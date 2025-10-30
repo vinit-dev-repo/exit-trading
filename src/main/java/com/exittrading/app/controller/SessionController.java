@@ -43,6 +43,9 @@ public class SessionController {
             Object kite = kiteClass.getConstructor(String.class).newInstance(apiKey);
             Method generateSession = kiteClass.getMethod("generateSession", String.class, String.class);
             Object user = generateSession.invoke(kite, requestToken, apiSecret);
+            invokeIfPresent(kiteClass, kite, "setAccessToken", extractField(user, "accessToken"));
+            invokeIfPresent(kiteClass, kite, "setPublicToken", extractField(user, "publicToken"));
+            attachExpiryHook(kiteClass, kite);
             String userName = extractField(user, "userName");
             ZonedDateTime expiry = extractExpiry(user, "accessTokenExpiry");
             sessionManager.initializeSession(kite, userName, expiry);
@@ -90,5 +93,30 @@ public class SessionController {
         } catch (Exception ignored) {
         }
         return clock.now().plusHours(6);
+    }
+
+    private void invokeIfPresent(Class<?> targetType, Object target, String methodName, Object argument) {
+        if (argument == null) {
+            return;
+        }
+        try {
+            Method method = targetType.getMethod(methodName, String.class);
+            method.invoke(target, argument.toString());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void attachExpiryHook(Class<?> kiteClass, Object kite) {
+        try {
+            Class<?> hookClass = Class.forName("com.zerodhatech.kiteconnect.kitehttp.SessionExpiryHook");
+            Object hook = java.lang.reflect.Proxy.newProxyInstance(hookClass.getClassLoader(), new Class<?>[]{hookClass},
+                    (proxy, method, args) -> {
+                        sessionManager.invalidateSession();
+                        return null;
+                    });
+            Method setHook = kiteClass.getMethod("setSessionExpiryHook", hookClass);
+            setHook.invoke(kite, hook);
+        } catch (Exception ignored) {
+        }
     }
 }

@@ -47,6 +47,14 @@ public class DefaultKiteGateway implements KiteGateway {
                 setField(orderParamsClass, orderParams, "tradingsymbol", schedule.getTradingsymbol());
                 setField(orderParamsClass, orderParams, "quantity", schedule.getQuantity());
                 setField(orderParamsClass, orderParams, "transactionType",
+                        schedule.getSide() == OrderSide.BUY ? getConstant("TRANSACTION_TYPE_BUY")
+                                : getConstant("TRANSACTION_TYPE_SELL"));
+                setField(orderParamsClass, orderParams, "orderType",
+                        schedule.getLimitPrice() != null ? getConstant("ORDER_TYPE_LIMIT")
+                                : getConstant("ORDER_TYPE_MARKET"));
+                setField(orderParamsClass, orderParams, "exchange", exchange);
+                setField(orderParamsClass, orderParams, "product", getConstant("PRODUCT_MIS"));
+                setField(orderParamsClass, orderParams, "validity", getConstant("VALIDITY_DAY"));
                         schedule.getSide() == OrderSide.BUY ? getStaticField(orderParamsClass, "TRANSACTION_TYPE_BUY")
                                 : getStaticField(orderParamsClass, "TRANSACTION_TYPE_SELL"));
                 setField(orderParamsClass, orderParams, "orderType",
@@ -62,6 +70,17 @@ public class DefaultKiteGateway implements KiteGateway {
                 setField(orderParamsClass, orderParams, "tag", "PCA");
 
                 Method placeOrder = kite.getClass().getMethod("placeOrder", orderParamsClass, String.class);
+                Object variety = getConstant("VARIETY_REGULAR");
+                Object response = placeOrder.invoke(kite, orderParams, variety.toString());
+                if (response instanceof Map<?, ?> map) {
+                    Object orderId = map.get("order_id");
+                    if (orderId != null) {
+                        return orderId.toString();
+                    }
+                }
+                Class<?> orderClass = Class.forName("com.zerodhatech.models.Order");
+                if (orderClass.isInstance(response)) {
+                    Object orderId = getField(orderClass, response, "orderId");
                 Object variety = getStaticField(Class.forName("com.zerodhatech.kiteconnect.KiteConnect"), "VARIETY_REGULAR");
                 Object response = placeOrder.invoke(kite, orderParams, variety.toString());
                 if (response instanceof Map<?, ?> map) {
@@ -117,6 +136,29 @@ public class DefaultKiteGateway implements KiteGateway {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Object kite = sessionManager.getKiteConnect();
+                String instrument = exchange + ":" + tradingsymbol;
+                Method getQuote = kite.getClass().getMethod("getQuote", String[].class);
+                Object depthResult = getQuote.invoke(kite, (Object) new String[]{instrument});
+                DepthView view = new DepthView();
+                view.setTradingsymbol(tradingsymbol);
+                if (depthResult instanceof Map<?, ?> depthMap) {
+                    Object quote = depthMap.get(instrument);
+                    if (quote != null) {
+                        Class<?> quoteClass = quote.getClass();
+                        Object depth = getField(quoteClass, quote, "depth");
+                        if (depth != null) {
+                            Class<?> depthClass = depth.getClass();
+                            Object buyLevels = getField(depthClass, depth, "buy");
+                            Object sellLevels = getField(depthClass, depth, "sell");
+                            long buyQty = aggregateDepth(buyLevels);
+                            long sellQty = aggregateDepth(sellLevels);
+                            view.setBuyQuantity(buyQty);
+                            view.setSellQuantity(sellQty);
+                        }
+                        Number lastPrice = (Number) getField(quoteClass, quote, "lastPrice");
+                        if (lastPrice == null) {
+                            lastPrice = (Number) getField(quoteClass, quote, "lastTradedPrice");
+                        }
                 Method getDepth = kite.getClass().getMethod("getDepth", String.class, String.class, int.class);
                 Object depthResult = getDepth.invoke(kite, exchange, tradingsymbol, 1);
                 DepthView view = new DepthView();
@@ -154,6 +196,20 @@ public class DefaultKiteGateway implements KiteGateway {
                 return fallback;
             }
         }, sessionManager.getMarketDataPool());
+    }
+
+    private long aggregateDepth(Object levels) {
+        if (!(levels instanceof List<?> list)) {
+            return 0;
+        }
+        long total = 0;
+        for (Object item : list) {
+            Object quantity = getField(item.getClass(), item, "quantity");
+            if (quantity instanceof Number number) {
+                total += number.longValue();
+            }
+        }
+        return total;
     }
 
     private void setField(Class<?> type, Object target, String fieldName, Object value) throws Exception {
