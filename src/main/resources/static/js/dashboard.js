@@ -119,13 +119,23 @@ function renderSchedules(schedules) {
     schedules.forEach(schedule => {
         const col = document.createElement('div');
         col.className = 'col-md-6 col-xl-4';
+        const limit = schedule.limitPrice != null ? `<span class=\"badge bg-secondary\">Limit: ${schedule.limitPrice}</span>` : '';
+        const auto = schedule.autoRepeat ? `<span class=\"badge bg-warning text-dark\">Auto Repeat</span>` : '';
         col.innerHTML = `
             <div class="card schedule-tile bg-dark border-light">
                 <div class="card-body">
-                    <h5 class="card-title">${schedule.tradingsymbol} <span class="badge bg-primary">${schedule.side}</span></h5>
-                    <p class="card-text mb-1">Qty: ${schedule.quantity} | Session: ${schedule.sessionTimeIst}</p>
-                    <p class="card-text mb-1">Trade Date: ${schedule.tradeDateIst}</p>
-                    <p class="card-text text-muted">Next Execution: ${schedule.nextExecutionTime ?? 'Pending'}</p>
+                    <h5 class="card-title">
+                        <span>${schedule.tradingsymbol}</span>
+                        <span class="badge bg-primary">${schedule.side}</span>
+                    </h5>
+                    <div class="schedule-meta">
+                        <span class="badge bg-secondary">Qty: ${schedule.quantity}</span>
+                        <span class="badge bg-secondary">Session: ${schedule.sessionTimeIst}</span>
+                        <span class="badge bg-secondary">Date: ${schedule.tradeDateIst}</span>
+                        ${limit}
+                        ${auto}
+                    </div>
+                    <p class="card-text small-note">Next: ${schedule.nextExecutionTime ?? 'Pending'}</p>
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm btn-outline-danger" data-action="cancel" data-id="${schedule.id}">Cancel</button>
                         <button class="btn btn-sm btn-outline-warning" data-action="repeat" data-id="${schedule.id}">Repeat Tomorrow</button>
@@ -150,14 +160,20 @@ function renderExecuted(executed) {
         const badgeClass = schedule.status === STATUS.EXECUTED ? 'bg-success' : 'bg-danger';
         const col = document.createElement('div');
         col.className = 'col-md-6 col-xl-4';
-        const nextDayFlag = schedule.autoRepeat ? '<span class="badge bg-warning text-dark ms-2">Auto Repeat</span>' : '';
+        const auto = schedule.autoRepeat ? '<span class="badge bg-warning text-dark">Auto Repeat</span>' : '';
         col.innerHTML = `
             <div class="card bg-secondary schedule-tile">
                 <div class="card-body">
-                    <h5 class="card-title">${schedule.tradingsymbol} <span class="badge ${badgeClass}">${schedule.status}</span>${nextDayFlag}</h5>
-                    <p class="card-text mb-1">Session: ${schedule.sessionTimeIst}</p>
-                    <p class="card-text mb-1">Message: ${schedule.lastExecutionMessage ?? 'N/A'}</p>
-                    <p class="card-text text-muted">Last Exec: ${schedule.lastExecutedAt ?? 'N/A'}</p>
+                    <h5 class="card-title">
+                        <span>${schedule.tradingsymbol}</span>
+                        <span class="badge ${badgeClass}">${schedule.status}</span>
+                    </h5>
+                    <div class="schedule-meta">
+                        <span class="badge bg-dark">Session: ${schedule.sessionTimeIst}</span>
+                        ${auto}
+                    </div>
+                    <p class="card-text small-note">Last Exec: ${schedule.lastExecutedAt ?? 'N/A'}</p>
+                    <p class="card-text small-note">Message: ${schedule.lastExecutionMessage ?? 'N/A'}</p>
                     <button class="btn btn-sm btn-outline-light" data-action="repeat" data-id="${schedule.id}">Repeat Tomorrow</button>
                 </div>
             </div>`;
@@ -280,7 +296,7 @@ async function fetchSessionStatus() {
             state.sessionActive = true;
             badge.className = 'badge bg-success';
             const userLabel = status.user ? `as ${status.user}` : '';
-            badge.innerHTML = `<i class="bi bi-check-circle me-1"></i>Active  � Expires ${status.expiry ?? ''}`;
+            badge.innerHTML = `<i class="bi bi-check-circle me-1"></i>Active → Expires ${status.expiry ?? ''}`;
             if (etaEl) {
                 const ms = expiryMs - Date.now();
                 const m = Math.max(0, Math.round(ms / 60000));

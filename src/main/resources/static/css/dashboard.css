@@ -14,9 +14,14 @@
     font-size: 0.9rem;
 }
 
+.bottom_padding{
+    padding-bottom:10px;
+}
+
+/* Schedule tiles should size to content for compactness */
 #scheduled-list .card,
 #executed-list .card {
-    min-height: 150px;
+    min-height: auto;
 }
 
 .schedule-tile {
@@ -27,6 +32,13 @@
     transform: translateY(-4px);
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
 }
+
+/* Tighter card body and readable compact meta chips */
+.schedule-tile .card-body { padding: .75rem .75rem; }
+.schedule-tile .card-title { font-size: 1rem; margin-bottom: .35rem; display:flex; align-items:center; justify-content:space-between; }
+.schedule-meta { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.35rem; }
+.schedule-meta .badge { font-size:.75rem; font-weight:500; }
+.schedule-tile .card-text.small-note { font-size:.8rem; color:#adb5bd; margin-bottom:.35rem; }
 
 /* Professional holding chip styling */
 .holding-chip { background:#f8f9fa; color:#212529; border:1px solid rgba(0,0,0,.125); border-radius: 8px; padding:8px 12px; margin:4px; cursor:pointer; min-width:140px; }
