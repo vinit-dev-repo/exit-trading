@@ -5,7 +5,7 @@ import com.exittrading.app.domain.TradingSchedule;
 import com.exittrading.app.dto.DepthView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -15,7 +15,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
-@ConditionalOnMissingBean(KiteGateway.class)
+@ConditionalOnMissingClass("com.zerodhatech.kiteconnect.KiteConnect")
 public class PaperTradingGateway implements KiteGateway {
 
     private static final Logger log = LoggerFactory.getLogger(PaperTradingGateway.class);

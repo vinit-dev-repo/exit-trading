@@ -1,9 +1,7 @@
 # Exit Trading – PCA Automation Console
-
 An ultra-fast, production-oriented Java trading automation console designed for orchestrating PCA (Price Cost Averaging) flows across multiple managed users. The application is built on Spring Boot 3, delivers a responsive admin dashboard, and integrates (optionally) with Zerodha's Kite Connect API for live order routing.
 
 ## Features
-
 - **Multi-user orchestration** – single admin can impersonate any onboarded user, toggle logging, manage holdings, and operate on their behalf.
 - **PCA session scheduler** – fixed PCA windows (09:30, 10:30, 11:30, 12:30, 13:30, 14:30 IST) with automatic 60-second pre-cleanup of open orders, <1ms order dispatch (pre-built request & high-resolution scheduling).
 - **Real-time dashboard** – three-panel layout for upcoming schedules, executed schedules, and holdings with one-click repeat. Market depth refreshes continuously in IST.

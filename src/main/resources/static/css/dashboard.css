@@ -1,4 +1,4 @@
-body {
+﻿body {
     font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
@@ -27,3 +27,47 @@ body {
     transform: translateY(-4px);
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
 }
+
+/* Professional holding chip styling */
+.holding-chip { background:#f8f9fa; color:#212529; border:1px solid rgba(0,0,0,.125); border-radius: 8px; padding:8px 12px; margin:4px; cursor:pointer; min-width:140px; }
+.holding-chip:hover { background:#e9ecef; }
+.holding-chip .chip-line { line-height: 1; }
+.holding-chip .chip-meta { font-size: .85rem; }
+
+
+/* Sidebar visual polish */
+.sidebar-card{position:static;top:1rem;background:linear-gradient(180deg,#1f2430,#1b2230);border:1px solid rgba(255,255,255,.08);} 
+.sidebar-card .form-control,.sidebar-card .form-select{background-color:#242a36;border-color:#3a4152;color:#e9ecef;}
+.sidebar-card .form-control::placeholder{color:#b5bfcb;}
+.sidebar-card .section-title{font-weight:600;letter-spacing:.2px;color:#f8f9fa;}
+.sidebar-card .form-label,.sidebar-card label{color:#e9ecef !important;}
+.sidebar-card .form-check-label{color:#e9ecef !important;}
+.sidebar-card .text-muted{color:#ced4da !important;}
+.sidebar-card .form-check-input{background-color:#2f3646;border-color:#495368;}
+.section-divider{border-top:1px solid rgba(255,255,255,.18);margin:1rem 0;}
+
+/* App header */
+.app-header{background-color:#243447;border:1px solid rgba(255,255,255,.08);}
+.app-header h1{color:#f8f9fa;}
+.app-header .badge{background-color:#495f7e !important;color:#fff !important;}
+
+/* Flat card header colors with readable contrast */
+.card .card-header.et-flat-header.bg-primary{background-color:#2b3a67 !important;color:#f8f9fa !important;}
+.card .card-header.et-flat-header.bg-success{background-color:#2e7d6b !important;color:#f8f9fa !important;}
+.card .card-header.et-flat-header.bg-warning{background-color:#b08922 !important;color:#212529 !important;}
+.card .card-header.et-flat-header.bg-info{background-color:#2b7a78 !important;color:#f8f9fa !important;}
+
+
+/* Settings floating action button (top-right) */
+.settings-fab{position:fixed;right:16px;top:16px;z-index:1030;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.25);} 
+/* Header improvements */
+.app-header{background:linear-gradient(180deg,#203040,#1b2a38);border:1px solid rgba(255,255,255,.08);border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.25);} 
+.app-header h1{font-weight:700;letter-spacing:.2px;color:#eef2f6;}
+
+/* Professional tooltip styling */
+.tooltip.tooltip-professional .tooltip-inner{background:#2b3a67;color:#f8f9fa;border:1px solid rgba(255,255,255,.15);} 
+.tooltip.tooltip-professional .tooltip-arrow::before{border-top-color:#2b3a67;}
+
+
+
+.app-header .status-wrap{margin-right:200px;}

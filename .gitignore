@@ -1,0 +1,73 @@
+# Maven / Build
+target/
+pom.xml.versionsBackup
+
+# Compiled classes and archives
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar
+*.tar.gz
+
+# IDE settings
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+bin/
+out/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+$RECYCLE.BIN/
+
+# Logs and diagnostics
+logs/
+*.log
+hs_err_pid*
+replay_pid*
+*.hprof
+heapdump.hprof
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.secret
+*.secrets
+
+# Spring Boot config overrides (keep base application.yml committed)
+src/main/resources/application-local.yml
+src/main/resources/application-*.local.yml
+src/main/resources/application-*.override.yml
+src/main/resources/application-*.secret.yml
+src/main/resources/*.properties.local
+src/main/resources/*.yml.local
+
+# Keystores / certificates (usually environment-provisioned)
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.crt
+*.der
+
+# Local libs (e.g., optional Kite jar placed by operator)
+lib/*
+!lib/README.md
+
+# H2 / embedded DB artifacts
+*.mv.db
+*.trace.db
+*.h2.db

@@ -41,10 +41,20 @@ public class AdminController {
 
     @GetMapping("/session/status")
     public Map<String, Object> sessionStatus() {
-        return Map.of(
-                "expiry", sessionManager.getExpiry(),
-                "active", sessionManager.getExpiry() != null,
-                "user", sessionManager.getUserName()
-        );
+        // Use a mutable map to allow null values for JSON serialization.
+        // Map.of(...) rejects nulls and was causing NPEs when expiry/user were null.
+        java.util.Map<String, Object> resp = new java.util.HashMap<>();
+        resp.put("expiry", sessionManager.getExpiry());
+        resp.put("active", sessionManager.getExpiry() != null);
+        resp.put("user", sessionManager.getUserName());
+        return resp;
+    }
+
+    // Debug helper: fetch holdings for a specific user (to verify backend has them)
+    @GetMapping("/users/{username}/holdings")
+    public Set<String> userHoldings(@PathVariable String username) {
+        return adminService.findOptionalByUsername(username)
+                .map(UserAccount::getHoldings)
+                .orElseGet(java.util.Set::of);
     }
 }

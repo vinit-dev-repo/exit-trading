@@ -32,10 +32,10 @@ logging:
     name: logs/exittrading.log
 
 kite:
-  apiKey: CHANGE_ME
-  apiSecret: CHANGE_ME
+  apiKey: nhc6dvd6ju9ns5we
+  apiSecret: q1twavhjsrkud3g04i7obe4w3dm6nmsr
   default:
-    exchange: NSE
+    exchange: BSE
 
 management:
   endpoints:

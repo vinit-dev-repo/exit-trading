@@ -24,6 +24,8 @@ public class DepthController {
 
     @GetMapping("/{username}")
     public List<DepthView> latestDepth(@PathVariable String username) {
-        return depthService.latest(adminService.findByUsername(username));
+        return adminService.findOptionalByUsername(username)
+                .map(depthService::latest)
+                .orElseGet(java.util.List::of);
     }
 }

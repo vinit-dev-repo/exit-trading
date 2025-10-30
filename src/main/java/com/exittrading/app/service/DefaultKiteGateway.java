@@ -44,48 +44,49 @@ public class DefaultKiteGateway implements KiteGateway {
                 Class<?> orderParamsClass = Class.forName("com.zerodhatech.models.OrderParams");
                 Object orderParams = orderParamsClass.getConstructor().newInstance();
 
+                // Required fields
                 setField(orderParamsClass, orderParams, "tradingsymbol", schedule.getTradingsymbol());
                 setField(orderParamsClass, orderParams, "quantity", schedule.getQuantity());
+
+                // Transaction and order type
+                Object txnBuy = safeStaticField(orderParamsClass, "TRANSACTION_TYPE_BUY", "BUY");
+                Object txnSell = safeStaticField(orderParamsClass, "TRANSACTION_TYPE_SELL", "SELL");
+                Object ordLimit = safeStaticField(orderParamsClass, "ORDER_TYPE_LIMIT", "LIMIT");
+                Object ordMarket = safeStaticField(orderParamsClass, "ORDER_TYPE_MARKET", "MARKET");
                 setField(orderParamsClass, orderParams, "transactionType",
-                        schedule.getSide() == OrderSide.BUY ? getConstant("TRANSACTION_TYPE_BUY")
-                                : getConstant("TRANSACTION_TYPE_SELL"));
+                        schedule.getSide() == OrderSide.BUY ? txnBuy : txnSell);
                 setField(orderParamsClass, orderParams, "orderType",
-                        schedule.getLimitPrice() != null ? getConstant("ORDER_TYPE_LIMIT")
-                                : getConstant("ORDER_TYPE_MARKET"));
+                        schedule.getLimitPrice() != null ? ordLimit : ordMarket);
+
+                // Misc
                 setField(orderParamsClass, orderParams, "exchange", exchange);
-                setField(orderParamsClass, orderParams, "product", getConstant("PRODUCT_MIS"));
-                setField(orderParamsClass, orderParams, "validity", getConstant("VALIDITY_DAY"));
-                        schedule.getSide() == OrderSide.BUY ? getStaticField(orderParamsClass, "TRANSACTION_TYPE_BUY")
-                                : getStaticField(orderParamsClass, "TRANSACTION_TYPE_SELL"));
-                setField(orderParamsClass, orderParams, "orderType",
-                        schedule.getLimitPrice() != null ? getStaticField(orderParamsClass, "ORDER_TYPE_LIMIT")
-                                : getStaticField(orderParamsClass, "ORDER_TYPE_MARKET"));
-                setField(orderParamsClass, orderParams, "quantityType", getStaticField(orderParamsClass, "QUANTITY"));
-                setField(orderParamsClass, orderParams, "exchange", exchange);
-                setField(orderParamsClass, orderParams, "product", getStaticField(orderParamsClass, "PRODUCT_MIS"));
-                setField(orderParamsClass, orderParams, "validity", getStaticField(orderParamsClass, "VALIDITY_DAY"));
+                setField(orderParamsClass, orderParams, "product",
+                        safeStaticField(orderParamsClass, "PRODUCT_MIS", "MIS"));
+                setField(orderParamsClass, orderParams, "validity",
+                        safeStaticField(orderParamsClass, "VALIDITY_DAY", "DAY"));
                 if (schedule.getLimitPrice() != null) {
                     setField(orderParamsClass, orderParams, "price", schedule.getLimitPrice().doubleValue());
                 }
                 setField(orderParamsClass, orderParams, "tag", "PCA");
 
+                // placeOrder(orderParams, variety)
                 Method placeOrder = kite.getClass().getMethod("placeOrder", orderParamsClass, String.class);
-                Object variety = getConstant("VARIETY_REGULAR");
-                Object response = placeOrder.invoke(kite, orderParams, variety.toString());
-                if (response instanceof Map<?, ?> map) {
-                    Object orderId = map.get("order_id");
-                    if (orderId != null) {
-                        return orderId.toString();
-                    }
-                }
-                Class<?> orderClass = Class.forName("com.zerodhatech.models.Order");
-                if (orderClass.isInstance(response)) {
-                    Object orderId = getField(orderClass, response, "orderId");
-                Object variety = getStaticField(Class.forName("com.zerodhatech.kiteconnect.KiteConnect"), "VARIETY_REGULAR");
-                Object response = placeOrder.invoke(kite, orderParams, variety.toString());
+                Object varietyConst = safeStaticField(Class.forName("com.zerodhatech.kiteconnect.KiteConnect"),
+                        "VARIETY_REGULAR", "regular");
+                Object response = placeOrder.invoke(kite, orderParams, String.valueOf(varietyConst));
+
                 if (response instanceof Map<?, ?> map) {
                     Object orderId = map.get("order_id");
                     return orderId != null ? orderId.toString() : "UNKNOWN";
+                }
+                try {
+                    Class<?> orderClass = Class.forName("com.zerodhatech.models.Order");
+                    if (orderClass.isInstance(response)) {
+                        Object orderId = getField(orderClass, response, "orderId");
+                        return orderId != null ? orderId.toString() : "UNKNOWN";
+                    }
+                } catch (ClassNotFoundException ignored) {
+                    // Fall through
                 }
                 return "UNKNOWN";
             } catch (Exception ex) {
@@ -159,28 +160,6 @@ public class DefaultKiteGateway implements KiteGateway {
                         if (lastPrice == null) {
                             lastPrice = (Number) getField(quoteClass, quote, "lastTradedPrice");
                         }
-                Method getDepth = kite.getClass().getMethod("getDepth", String.class, String.class, int.class);
-                Object depthResult = getDepth.invoke(kite, exchange, tradingsymbol, 1);
-                DepthView view = new DepthView();
-                view.setTradingsymbol(tradingsymbol);
-                if (depthResult instanceof Map<?, ?> depthMap) {
-                    Object depthData = depthMap.get(tradingsymbol);
-                    if (depthData != null) {
-                        Class<?> depthClass = depthData.getClass();
-                        List<?> buys = (List<?>) getField(depthClass, depthData, "buy");
-                        List<?> sells = (List<?>) getField(depthClass, depthData, "sell");
-                        long buyQty = buys == null ? 0 : buys.stream().mapToLong(item -> ((Number) getField(item.getClass(), item, "quantity")).longValue()).sum();
-                        long sellQty = sells == null ? 0 : sells.stream().mapToLong(item -> ((Number) getField(item.getClass(), item, "quantity")).longValue()).sum();
-                        view.setBuyQuantity(buyQty);
-                        view.setSellQuantity(sellQty);
-                    }
-                }
-                Method getLtp = kite.getClass().getMethod("getLTP", String.class, String.class);
-                Object ltpResult = getLtp.invoke(kite, exchange, tradingsymbol);
-                if (ltpResult instanceof Map<?, ?> ltpMap) {
-                    Object quote = ltpMap.get(tradingsymbol);
-                    if (quote != null) {
-                        Number lastPrice = (Number) getField(quote.getClass(), quote, "lastPrice");
                         if (lastPrice != null) {
                             view.setLtp(BigDecimal.valueOf(lastPrice.doubleValue()));
                         }
@@ -232,5 +211,13 @@ public class DefaultKiteGateway implements KiteGateway {
         Field field = type.getField(name);
         field.setAccessible(true);
         return field.get(null);
+    }
+
+    private Object safeStaticField(Class<?> type, String name, Object fallback) {
+        try {
+            return getStaticField(type, name);
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 }

@@ -54,9 +54,9 @@ public class ScheduleService {
     }
 
     public List<ScheduleResponse> fetchAllForUser(String username) {
-        UserAccount user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new EntityNotFoundException("User not found"));
-        return scheduleRepository.findByUser(user).stream().map(this::toResponse).collect(Collectors.toList());
+        return userRepository.findByUsername(username)
+                .map(u -> scheduleRepository.findByUser(u).stream().map(this::toResponse).collect(Collectors.toList()))
+                .orElseGet(java.util.List::of);
     }
 
     @Transactional

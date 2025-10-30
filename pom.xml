@@ -93,6 +93,12 @@
             <version>3.25.3</version>
             <scope>test</scope>
         </dependency>
+        <!-- https://central.sonatype.com/artifact/com.zerodhatech.kiteconnect/kiteconnect -->
+        <dependency>
+            <groupId>com.zerodhatech.kiteconnect</groupId>
+            <artifactId>kiteconnect</artifactId>
+            <version>3.5.1</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -100,6 +106,14 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring.boot.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -112,6 +126,10 @@
                     <compilerArgs>
                         <arg>-parameters</arg>
                     </compilerArgs>
+                    <!-- Exclude SDK example harness that depends on full Kite SDK -->
+                    <testExcludes>
+                        <exclude>sample/**</exclude>
+                    </testExcludes>
                 </configuration>
             </plugin>
         </plugins>

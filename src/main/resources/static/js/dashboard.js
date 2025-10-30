@@ -1,7 +1,12 @@
 const state = {
     users: [],
     currentUser: null,
-    refreshHandle: null
+    refreshHandle: null,
+    scheduleHandle: null,
+    depthHandle: null,
+    sessionHandle: null,
+    holdingsFilter: 'ALL',
+    sessionActive: false
 };
 
 const STATUS = {
@@ -42,28 +47,46 @@ async function loadUsers() {
         const option = document.createElement('option');
         option.value = user.username;
         option.textContent = `${user.displayName} (${user.username})`;
-        if (idx === 0) {
-            option.selected = true;
-            state.currentUser = user.username;
-        }
         selector.appendChild(option);
     });
     selector.addEventListener('change', () => {
         state.currentUser = selector.value;
         bootstrapUserSettings();
     });
+    // Prefer selecting the active Kite session user if available
+    try {
+        const sess = await fetchJson('/api/admin/session/status');
+        const preferred = sess?.user;
+        if (preferred && users.some(u => u.username === preferred)) {
+            selector.value = preferred;
+            state.currentUser = preferred;
+        } else if (users.length > 0 && !state.currentUser) {
+            selector.selectedIndex = 0;
+            state.currentUser = users[0].username;
+        }
+    } catch (_) {
+        if (users.length > 0 && !state.currentUser) {
+            selector.selectedIndex = 0;
+            state.currentUser = users[0].username;
+        }
+    }
     bootstrapUserSettings();
 }
 
 async function bootstrapUserSettings() {
     const user = state.users.find(u => u.username === state.currentUser);
+    if (!user) {
+        return;
+    }
     document.getElementById('logging-toggle').checked = !!user.loggingEnabled;
     document.getElementById('tradeDate').value = new Date().toISOString().split('T')[0];
     renderHoldings(user.holdings || []);
-    refreshData();
+    await refreshSchedules();
+    await refreshDepth();
+    await fetchSessionStatus();
 }
 
-async function refreshData() {
+async function refreshSchedules() {
     if (!state.currentUser) return;
     try {
         const data = await fetchJson(`/api/schedules/${state.currentUser}`);
@@ -74,8 +97,6 @@ async function refreshData() {
     } catch (err) {
         console.error(err);
     }
-    refreshDepth();
-    fetchSessionStatus();
 }
 
 async function refreshDepth() {
@@ -145,6 +166,28 @@ function renderExecuted(executed) {
     container.querySelectorAll('button').forEach(btn => btn.addEventListener('click', handleScheduleAction));
 }
 
+function parseHolding(entry) {
+    if (!entry) return { exchange: null, symbol: '' };
+    // Format: EXCH:SYMBOL|QTY|AVG|LAST|PNL|PCT|PRODUCT|TOKEN (tail segments optional)
+    let main = entry;
+    let qty = null, avg = null, last = null, pnl = null, pct = null, product = null, token = null;
+    const parts = entry.split('|');
+    if (parts.length > 1) {
+        main = parts[0];
+        qty = parts[1] ? Number(parts[1]) : null;
+        avg = parts[2] ? Number(parts[2]) : null;
+        last = parts[3] ? Number(parts[3]) : null;
+        pnl = parts[4] ? Number(parts[4]) : null;
+        pct = parts[5] ? Number(parts[5]) : null;
+        product = parts[6] || null;
+        token = parts[7] || null;
+    }
+    const idx = main.indexOf(':');
+    const exchange = idx > 0 ? main.substring(0, idx) : null;
+    const symbol = idx > 0 ? main.substring(idx + 1) : main;
+    return { exchange, symbol, qty, avg, last, pnl, pct, product, token };
+}
+
 function renderHoldings(holdings) {
     const container = document.getElementById('holdings-list');
     container.innerHTML = '';
@@ -152,13 +195,34 @@ function renderHoldings(holdings) {
         container.innerHTML = '<span class="text-muted">No holdings configured.</span>';
         return;
     }
-    holdings.forEach(symbol => {
-        const badge = document.createElement('span');
-        badge.className = 'badge rounded-pill bg-light text-dark p-3';
-        badge.style.cursor = 'pointer';
-        badge.textContent = symbol;
-        badge.addEventListener('click', () => presetSchedule(symbol));
-        container.appendChild(badge);
+    const filter = state.holdingsFilter;
+    holdings.forEach(entry => {
+        const { exchange, symbol, qty, avg, last, pnl, pct, product, token } = parseHolding(entry);
+        if (filter !== 'ALL' && exchange && exchange.toUpperCase() !== filter) return;
+        const chip = document.createElement('div');
+        chip.className = 'holding-chip';
+        chip.title = [
+            exchange ? `Exchange: ${exchange}` : null,
+            qty != null ? `Qty: ${qty}` : null,
+            avg != null ? `Avg: ${avg.toFixed(2)}` : null,
+            last != null ? `LTP: ${last.toFixed(2)}` : null,
+            pnl != null ? `PnL: ${pnl.toFixed(2)}` : null,
+            pct != null ? `Day%: ${pct.toFixed(2)}` : null,
+            product ? `Product: ${product}` : null,
+            token ? `Token: ${token}` : null
+        ].filter(Boolean).join(' | ');
+        chip.innerHTML = `
+            <div class="chip-line"><strong>${symbol}</strong>${exchange ? ` <span class="text-muted">(${exchange})</span>` : ''}</div>
+            <div class="chip-meta text-muted">${
+                [
+                    qty != null ? `Qty ${qty}` : null,
+                    avg != null ? `Avg ${avg.toFixed(2)}` : null,
+                    last != null ? `LTP ${last.toFixed(2)}` : null,
+                    pct != null ? `${pct.toFixed(2)}%` : null
+                ].filter(Boolean).join(' · ')
+            }</div>`;
+        chip.addEventListener('click', () => presetSchedule({ symbol, token, qty }));
+        container.appendChild(chip);
     });
 }
 
@@ -183,8 +247,13 @@ function renderDepth(depths) {
     });
 }
 
-function presetSchedule(symbol) {
+function presetSchedule(holding) {
+    const symbol = typeof holding === 'string' ? holding : holding.symbol;
+    const token = typeof holding === 'string' ? null : holding.token;
+    const qty = typeof holding === 'string' ? null : holding.qty;
     document.getElementById('tradingsymbol').value = symbol;
+    if (token) document.getElementById('instrumentToken').value = token;
+    if (qty != null && !Number.isNaN(qty)) document.getElementById('quantity').value = qty;
     document.getElementById('instrumentToken').focus();
 }
 
@@ -197,29 +266,105 @@ async function handleScheduleAction(event) {
     if (action === 'repeat') {
         await fetch(`/api/schedules/${id}/repeat`, { method: 'POST' });
     }
-    refreshData();
+    refreshSchedules();
 }
 
 async function fetchSessionStatus() {
     try {
         const status = await fetchJson('/api/admin/session/status');
         const badge = document.getElementById('session-status');
-        if (status.active) {
+        const etaEl = document.getElementById('session-eta');
+        const expiryMs = status.expiry ? Date.parse(status.expiry) : null;
+        const isExpired = !!(status.active && expiryMs && expiryMs <= Date.now());
+        if (status.active && !isExpired) {
+            state.sessionActive = true;
             badge.className = 'badge bg-success';
-            const userLabel = status.user ? ` · User ${status.user}` : '';
-            badge.textContent = `Session Active${userLabel} · Expiry ${status.expiry ?? ''}`;
+            const userLabel = status.user ? `as ${status.user}` : '';
+            badge.innerHTML = `<i class="bi bi-check-circle me-1"></i>Active  � Expires ${status.expiry ?? ''}`;
+            if (etaEl) {
+                const ms = expiryMs - Date.now();
+                const m = Math.max(0, Math.round(ms / 60000));
+                etaEl.textContent = `(expires in ${m}m)`;
+            }
+        } else if (isExpired) {
+            state.sessionActive = false;
+            badge.className = 'badge bg-warning text-dark';
+            const userLabel = status.user ? `as ${status.user}` : '';
+            badge.innerHTML = `<i class="bi bi-exclamation-triangle me-1"></i>Session expired ${userLabel}`;
+            if (etaEl) etaEl.textContent = '';
         } else {
-            badge.className = 'badge bg-danger';
-            badge.textContent = 'Session inactive';
+            state.sessionActive = false;
+            badge.className = 'badge bg-secondary';
+            badge.innerHTML = `<i class="bi bi-slash-circle me-1"></i>No active session`;
+            if (etaEl) etaEl.textContent = '';
+        }
+        // Toggle Login/Logout/Reconnect UI
+        const connectBtn = document.getElementById('kite-connect-btn');
+        const tokenInput = document.getElementById('kite-request-token');
+        const logoutBtn = document.getElementById('kite-logout-btn');
+        if (connectBtn && tokenInput && logoutBtn) {
+            if (!status.active) {
+                connectBtn.dataset.mode = 'login';
+                connectBtn.textContent = 'Login';
+                if (window.setTooltip) setTooltip(connectBtn,'Login');
+                connectBtn.disabled = false;
+                connectBtn.classList.remove('btn-outline-secondary');
+                connectBtn.classList.add('btn-primary');
+                tokenInput.style.display = '';
+                logoutBtn.disabled = true;
+                logoutBtn.classList.add('disabled');
+                if (window.setTooltip) setTooltip(logoutBtn,'Logout');
+            } else if (isExpired) {
+                connectBtn.dataset.mode = 'login';
+                connectBtn.textContent = 'Reconnect';
+                if (window.setTooltip) setTooltip(connectBtn,'Reconnect');
+                connectBtn.disabled = false;
+                connectBtn.classList.remove('btn-outline-secondary');
+                connectBtn.classList.add('btn-primary');
+                tokenInput.style.display = '';
+                logoutBtn.disabled = false;
+                logoutBtn.classList.remove('disabled');
+                if (window.setTooltip) setTooltip(logoutBtn,'Logout');
+            } else {
+                connectBtn.dataset.mode = 'noop';
+                connectBtn.textContent = 'Reconnect';
+                if (window.setTooltip) setTooltip(connectBtn,'Reconnect');
+                connectBtn.disabled = true;
+                connectBtn.classList.remove('btn-primary');
+                connectBtn.classList.add('btn-outline-secondary');
+                tokenInput.style.display = 'none';
+                logoutBtn.disabled = false;
+                logoutBtn.classList.remove('disabled');
+                if (window.setTooltip) setTooltip(logoutBtn,'Logout');
+            }
         }
     } catch (err) {
         document.getElementById('session-status').textContent = 'Session status unavailable';
+        const eta = document.getElementById('session-eta'); if (eta) eta.textContent = '';
     }
 }
 
 function scheduleAutoRefresh() {
     if (state.refreshHandle) clearInterval(state.refreshHandle);
-    state.refreshHandle = setInterval(refreshData, 5000);
+    if (state.scheduleHandle) clearInterval(state.scheduleHandle);
+    if (state.depthHandle) clearInterval(state.depthHandle);
+    if (state.sessionHandle) clearInterval(state.sessionHandle);
+    // Schedules: every 15s, Depth: every 8s, Session status: every 60s
+    state.scheduleHandle = setInterval(refreshSchedules, 15000);
+    state.depthHandle = setInterval(refreshDepth, 8000);
+    state.sessionHandle = setInterval(fetchSessionStatus, 60000);
+}
+
+function setTooltip(el, title) {
+    if (!el) return;
+    el.setAttribute("title", title);
+    try {
+        if (window.bootstrap && bootstrap.Tooltip) {
+            const inst = bootstrap.Tooltip.getInstance(el);
+            if (inst) inst.dispose();
+            new bootstrap.Tooltip(el);
+        }
+    } catch (_) {}
 }
 
 function setupFormHandlers() {
@@ -248,7 +393,7 @@ function setupFormHandlers() {
             });
             form.reset();
             document.getElementById('tradeDate').value = new Date().toISOString().split('T')[0];
-            refreshData();
+            refreshSchedules();
         } catch (err) {
             alert(err.message || 'Failed to schedule');
         }
@@ -262,14 +407,124 @@ function setupFormHandlers() {
         });
     });
 
-    document.getElementById('refresh-btn').addEventListener('click', refreshData);
+    document.getElementById('refresh-btn').addEventListener('click', async () => {
+        await refreshSchedules();
+        await refreshDepth();
+        await fetchSessionStatus();
+    });
+
+    // Kite connect handlers if present in DOM
+    const connectBtn = document.getElementById('kite-connect-btn');
+    const logoutBtn = document.getElementById('kite-logout-btn');
+    const syncBtn = document.getElementById('sync-holdings-btn');
+    const holdingsFilter = document.getElementById('holdings-exchange-filter');
+    if (connectBtn) {
+        connectBtn.addEventListener('click', async () => {
+            if (connectBtn.dataset.mode === 'logout') {
+                try {
+                    await fetchJson('/api/admin/session/logout', { method: 'POST' });
+                    await fetchSessionStatus();
+                } catch (e) {
+                    alert(e.message || 'Logout failed');
+                }
+                return;
+            }
+            const input = document.getElementById('kite-request-token');
+            const token = (input?.value || '').trim();
+            if (!token) {
+                alert('Enter the Kite request_token');
+                return;
+            }
+            try {
+                const resp = await fetchJson('/api/admin/session/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ requestToken: token })
+                });
+                await fetchSessionStatus();
+                await loadUsers();
+                if (resp?.user) {
+                    const selector = document.getElementById('user-selector');
+                    selector.value = resp.user;
+                    state.currentUser = resp.user;
+                    bootstrapUserSettings();
+                }
+                alert(`Kite connected${resp.user ? ' as ' + resp.user : ''}`);
+            } catch (e) {
+                alert(e.message || 'Kite login failed');
+            }
+        });
+    }
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            try {
+                await fetchJson('/api/admin/session/logout', { method: 'POST' });
+                await fetchSessionStatus();
+            } catch (e) {
+                alert(e.message || 'Logout failed');
+            }
+        });
+    }
+    if (syncBtn) {
+        syncBtn.addEventListener('click', async () => {
+            try {
+                const res = await fetchJson('/api/admin/session/holdings/sync', { method: 'POST' });
+                await loadUsers();
+                // Prefer showing the active session user after sync
+                try {
+                    const sess = await fetchJson('/api/admin/session/status');
+                    if (sess?.user) {
+                        const selector = document.getElementById('user-selector');
+                        selector.value = sess.user;
+                        state.currentUser = sess.user;
+                        bootstrapUserSettings();
+                    }
+                } catch(_) {}
+                alert(`Holdings synced (${res.updated ?? 0})`);
+            } catch (e) {
+                alert(e.message || 'Sync failed');
+            }
+        });
+    }
+    if (holdingsFilter) {
+        holdingsFilter.addEventListener('change', () => {
+            state.holdingsFilter = holdingsFilter.value;
+            const user = state.users.find(u => u.username === state.currentUser);
+            renderHoldings(user?.holdings || []);
+        });
+    }
 }
 
 async function init() {
     await loadUsers();
     setupFormHandlers();
-    refreshData();
+    // Initial fetches
+    await refreshSchedules();
+    await refreshDepth();
+    await fetchSessionStatus();
     scheduleAutoRefresh();
+    // Enable Bootstrap tooltips, if available
+    try {
+        if (window.bootstrap && bootstrap.Tooltip) {
+            document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
+        }
+    } catch (_) {}
 }
 
 window.addEventListener('DOMContentLoaded', init);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
