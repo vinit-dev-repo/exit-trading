@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Exit Trading PCA Console</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body class="bg-dark text-light">
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3">PCA Flow Scheduler</h1>
+        <div id="session-status" class="badge bg-secondary">Checking session...</div>
+    </div>
+    <div class="row g-4">
+        <div class="col-lg-3">
+            <div class="card shadow-sm bg-secondary">
+                <div class="card-body">
+                    <h5 class="card-title">Admin Console</h5>
+                    <div class="mb-3">
+                        <label for="user-selector" class="form-label">Impersonate User</label>
+                        <select id="user-selector" class="form-select"></select>
+                    </div>
+                    <button id="refresh-btn" class="btn btn-outline-light btn-sm">Refresh Data</button>
+                    <hr class="border-light">
+                    <h6>Logging</h6>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="logging-toggle">
+                        <label class="form-check-label" for="logging-toggle">Enable verbose logging</label>
+                    </div>
+                    <hr class="border-light">
+                    <h6>New Schedule</h6>
+                    <form id="schedule-form" class="needs-validation" novalidate>
+                        <div class="mb-2">
+                            <label class="form-label">Trading Symbol</label>
+                            <input type="text" class="form-control" id="tradingsymbol" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Instrument Token</label>
+                            <input type="text" class="form-control" id="instrumentToken" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Quantity</label>
+                            <input type="number" class="form-control" id="quantity" min="1" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Side</label>
+                            <select class="form-select" id="side">
+                                <option value="BUY">BUY</option>
+                                <option value="SELL">SELL</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Session</label>
+                            <select class="form-select" id="sessionSlot">
+                                <option value="SLOT_0930">09:30</option>
+                                <option value="SLOT_1030">10:30</option>
+                                <option value="SLOT_1130">11:30</option>
+                                <option value="SLOT_1230">12:30</option>
+                                <option value="SLOT_1330">13:30</option>
+                                <option value="SLOT_1430">14:30</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Trade Date (IST)</label>
+                            <input type="date" class="form-control" id="tradeDate" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label">Limit Price (optional)</label>
+                            <input type="number" class="form-control" id="limitPrice" step="0.01">
+                        </div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="autoRepeat">
+                            <label class="form-check-label" for="autoRepeat">Repeat daily</label>
+                        </div>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="cancelOrders" checked>
+                            <label class="form-check-label" for="cancelOrders">Cancel open orders 60s prior</label>
+                        </div>
+                        <button class="btn btn-light w-100" type="submit">Schedule</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-9">
+            <div class="row g-4">
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-light">
+                            <h5 class="mb-0">Section 1: Upcoming PCA Schedules</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="scheduled-list" class="row g-3"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-success text-light">
+                            <h5 class="mb-0">Section 2: Executed Schedules</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="executed-list" class="row g-3"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-warning">
+                            <h5 class="mb-0">Section 3: Holdings &amp; Quick Repeat</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="holdings-list" class="d-flex flex-wrap gap-2"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-info text-dark">
+                            <h5 class="mb-0">Real-time Market Depth</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped">
+                                    <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Buy Qty</th>
+                                        <th>Sell Qty</th>
+                                        <th>Pressure</th>
+                                        <th>LTP</th>
+                                        <th>Updated (IST)</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody id="depth-table"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="/js/dashboard.js"></script>
+</body>
+</html>
