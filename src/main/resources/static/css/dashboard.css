@@ -1,0 +1,29 @@
+body {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+.card {
+    border: none;
+}
+
+.table td, .table th {
+    vertical-align: middle;
+}
+
+.badge {
+    font-size: 0.9rem;
+}
+
+#scheduled-list .card,
+#executed-list .card {
+    min-height: 150px;
+}
+
+.schedule-tile {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.schedule-tile:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
+}

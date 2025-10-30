@@ -1,0 +1,44 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:exittrading;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    driverClassName: org.h2.Driver
+    username: sa
+    password: ''
+  h2:
+    console:
+      enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    time-zone: Asia/Kolkata
+
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+  error:
+    include-message: always
+
+logging:
+  level:
+    root: INFO
+    com.exittrading: DEBUG
+  file:
+    name: logs/exittrading.log
+
+kite:
+  apiKey: CHANGE_ME
+  apiSecret: CHANGE_ME
+  default:
+    exchange: NSE
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
