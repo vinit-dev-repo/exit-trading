@@ -11,8 +11,4 @@ public class OrderParams {
     public double price;
     public double triggerPrice;
     public String tag;
-    public int validityTTL;
-    public int icebergLegs;
-    public int icebergQuantity;
-    public double marketProtection;
 }
