@@ -100,6 +100,18 @@
                                 <input type="number" class="form-control" id="limitPrice" step="0.01" placeholder="e.g., 1540.00" />
                             </div>
                         </div>
+                        <div class="row g-2 mt-1 align-items-end">
+                            <div class="col-md-6">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="manual-mode-toggle">
+                                    <label class="form-check-label" for="manual-mode-toggle">Manual time (override session)</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Manual Time (IST)</label>
+                                <input type="time" class="form-control" id="manualTime" step="60" disabled />
+                            </div>
+                        </div>
                         <button class="btn btn-success btn-sm w-100 mt-2" type="submit"><i class="bi bi-send me-1"></i>Schedule</button>
                     </form>
                 </div>
@@ -131,12 +143,12 @@
                 </div>
                 <div class="col-12">
                     <div class="card shadow-sm">
-                        <div class="card-header bg-warning">
-                            <h5 class="mb-0">Holdings &amp; Quick Repeat</h5>
+                        <div class="card-header bg-info text-dark">
+                            <h5 class="mb-0">Holdings &amp; Market Depth</h5>
                         </div>
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-center mb-2">
-                                <div class="text-muted small">Click a holding to preset a schedule</div>
+                                <div class="text-muted small">Click a holding to preset a schedule and view depth</div>
                                 <div class="d-flex align-items-center gap-2 status-wrap">
                                     <label for="holdings-exchange-filter" class="form-label mb-0 small">Exchange</label>
                                     <select id="holdings-exchange-filter" class="form-select form-select-sm" style="width:auto">
@@ -146,30 +158,14 @@
                                     </select>
                                 </div>
                             </div>
-                            <div id="holdings-list" class="d-flex flex-wrap gap-2"></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-12">
-                    <div class="card shadow-sm">
-                        <div class="card-header bg-info text-dark">
-                            <h5 class="mb-0">Real-time Market Depth</h5>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-dark table-striped">
-                                    <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Buy Qty</th>
-                                        <th>Sell Qty</th>
-                                        <th>Pressure</th>
-                                        <th>LTP</th>
-                                        <th>Updated (IST)</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody id="depth-table"></tbody>
-                                </table>
+
+                            <div class="row g-3">
+                                <div class="col-lg-7">
+                                    <div id="holdings-list" class="d-flex flex-wrap gap-2"></div>
+                                </div>
+                                <div class="col-lg-5">
+                                    <div id="depth-panels" class="et-depth-list"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -219,4 +215,3 @@
 <script src="/js/dashboard.js"></script>
 </body>
 </html>
-

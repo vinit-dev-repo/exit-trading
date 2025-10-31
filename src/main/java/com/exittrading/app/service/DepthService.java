@@ -23,7 +23,12 @@ public class DepthService {
     }
 
     public DepthView captureDepth(TradingSchedule schedule) {
-        return gateway.fetchDepth(schedule).join();
+        try {
+            DepthView v = gateway.fetchDepth(schedule).join();
+            return v;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Transactional
@@ -66,18 +71,27 @@ public class DepthService {
             return persisted;
         }
         // Fallback: fetch up to 5 live depths from holdings
-        return user.getHoldings().stream()
+        java.util.List<DepthView> result = user.getHoldings().stream()
                 .filter(sym -> sym != null && !sym.isBlank())
                 .limit(5)
                 .map(sym -> {
-                    String symbolOnly = sym;
-                    int idx = sym.indexOf(':');
-                    if (idx > -1 && idx + 1 < sym.length()) {
-                        symbolOnly = sym.substring(idx + 1);
+                    String main = sym;
+                    int pipe = main.indexOf('|');
+                    if (pipe > -1) {
+                        main = main.substring(0, pipe);
                     }
-                    return gateway.fetchDepth(symbolOnly, null);
+                    // Extract token if present as 8th segment
+                    String token = null;
+                    String[] parts = sym.split("\\|");
+                    if (parts.length >= 8) {
+                        token = parts[7] != null && !parts[7].isBlank() ? parts[7].trim() : null;
+                    }
+                    // Preserve exchange prefix if present, e.g., NSE:INFY
+                    String instrument = main;
+                    return gateway.fetchDepth(instrument, token);
                 })
                 .map(java.util.concurrent.CompletableFuture::join)
                 .collect(Collectors.toList());
+        return result;
     }
 }

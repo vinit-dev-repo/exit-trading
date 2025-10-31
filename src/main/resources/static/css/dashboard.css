@@ -24,23 +24,31 @@
     min-height: auto;
 }
 
-.schedule-tile {
+/* Make schedule cards look like the holding chips */
+.schedule-tile { 
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+    background:#a8a8a7 !important; 
+    color:#212529 !important; 
+    border:1px solid rgba(0,0,0,.125) !important; 
+    border-radius:10px; 
 }
 
 .schedule-tile:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 0.35rem 0.75rem rgba(0, 0, 0, 0.25);
+    background:#e9ecef !important;
 }
 
 /* Tighter card body and readable compact meta chips */
-.schedule-tile .card-body { padding: .75rem .75rem; }
+.schedule-tile .card-body { padding: 8px 12px; }
 .schedule-tile .card-title { font-size: 1rem; margin-bottom: .35rem; display:flex; flex-direction:column; align-items:flex-start; gap:.35rem; }
 .schedule-tile .card-title > span.badge { order:1; align-self:flex-start; }
 .schedule-tile .card-title > span:first-child:not(.badge) { display:none; }
 .schedule-symbol { font-weight:600; letter-spacing:.2px; margin-bottom:.25rem; }
 .schedule-meta { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.35rem; }
-.schedule-meta .badge { font-size:.75rem; font-weight:500; }
+.schedule-meta .badge { font-size:.75rem; font-weight:500; background:#e9ecef; color:#212529; border:1px solid rgba(0,0,0,.15); border-radius:12px; }
+.schedule-tile .badge.bg-dark { background:#dee2e6 !important; color:#212529 !important; border:1px solid rgba(0,0,0,.15); }
+.schedule-tile .badge.bg-secondary { background:#e9ecef !important; color:#212529 !important; border:1px solid rgba(0,0,0,.15); }
 .schedule-tile .card-text.small-note { font-size:.8rem; color:#adb5bd; margin-bottom:.35rem; }
 
 /* Header row layout like mock */
@@ -90,3 +98,25 @@
 
 
 .app-header .status-wrap{margin-right:200px;}
+
+/* Depth detail panel (mocked like screenshot) */
+.et-depth-panel{background:#111821;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px;color:#e9ecef;min-height:160px}
+.et-depth-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;}
+.et-depth-panel.small{padding:10px;}
+.et-depth-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.et-depth-symbol{font-weight:700;letter-spacing:.2px}
+.et-depth-price{font-weight:600}
+.et-depth-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px}
+.et-depth-col{background:#151e29;border:1px solid rgba(255,255,255,.06);border-radius:6px;padding:8px}
+.et-depth-col h6{font-size:.8rem;margin:0 0 6px 0;color:#adb5bd}
+.et-depth-row{display:flex;align-items:center;justify-content:space-between;font-size:.9rem;margin:2px 0}
+.et-depth-meta{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px}
+.et-depth-meta .meta{background:#151e29;border:1px solid rgba(255,255,255,.06);border-radius:6px;padding:6px;font-size:.85rem}
+.et-depth-muted{color:#8fa0b3}
+
+/* Bid/Offer table inside depth panel */
+.et-depth-ladder{width:100%;border-collapse:separate;border-spacing:0 4px;font-size:.9rem}
+.et-depth-ladder th{color:#adb5bd;font-weight:600}
+.et-depth-ladder td,.et-depth-ladder th{padding:4px 6px}
+.et-bid{color:#5ad37d}
+.et-ask{color:#ff6b6b}

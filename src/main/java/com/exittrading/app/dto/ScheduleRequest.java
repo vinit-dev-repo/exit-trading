@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalTime;
 
 public class ScheduleRequest {
 
@@ -34,6 +35,9 @@ public class ScheduleRequest {
     private boolean autoRepeat;
 
     private boolean cancelOpenOrdersBeforeExecution = true;
+
+    // Optional manual scheduling override (IST)
+    private LocalTime scheduledTime;
 
     public String getTradingsymbol() {
         return tradingsymbol;
@@ -106,4 +110,7 @@ public class ScheduleRequest {
     public void setCancelOpenOrdersBeforeExecution(boolean cancelOpenOrdersBeforeExecution) {
         this.cancelOpenOrdersBeforeExecution = cancelOpenOrdersBeforeExecution;
     }
+
+    public LocalTime getScheduledTime() { return scheduledTime; }
+    public void setScheduledTime(LocalTime scheduledTime) { this.scheduledTime = scheduledTime; }
 }

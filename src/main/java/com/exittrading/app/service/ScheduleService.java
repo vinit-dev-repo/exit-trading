@@ -75,9 +75,21 @@ public class ScheduleService {
         schedule.setAutoRepeat(request.isAutoRepeat());
         schedule.setCancelOpenOrdersBeforeExecution(request.isCancelOpenOrdersBeforeExecution());
         schedule.setStatus(ScheduleStatus.SCHEDULED);
-        schedule.setNextExecutionTime(calculateNextExecutionTime(request.getTradeDate(), request.getSessionSlot()));
+        schedule.setNextExecutionTime(calculateNextExecutionTime(request.getTradeDate(), request.getSessionSlot(), request.getScheduledTime()));
         TradingSchedule saved = scheduleRepository.save(schedule);
-        log.info("Scheduled {} {} for {} at {}", schedule.getSide(), schedule.getQuantity(), schedule.getTradingsymbol(), schedule.getSessionSlot());
+        log.info("Scheduled req user={} symbol={} token={} side={} qty={} date={} slot={} manualTime={} next={} limit={} autoRepeat={} cancelBefore={}",
+                username,
+                schedule.getTradingsymbol(),
+                schedule.getInstrumentToken(),
+                schedule.getSide(),
+                schedule.getQuantity(),
+                schedule.getTradeDate(),
+                schedule.getSessionSlot(),
+                request.getScheduledTime(),
+                schedule.getNextExecutionTime(),
+                schedule.getLimitPrice(),
+                schedule.isAutoRepeat(),
+                schedule.isCancelOpenOrdersBeforeExecution());
         return toResponse(saved);
     }
 
@@ -94,8 +106,21 @@ public class ScheduleService {
         schedule.setLimitPrice(request.getLimitPrice());
         schedule.setAutoRepeat(request.isAutoRepeat());
         schedule.setCancelOpenOrdersBeforeExecution(request.isCancelOpenOrdersBeforeExecution());
-        schedule.setNextExecutionTime(calculateNextExecutionTime(request.getTradeDate(), request.getSessionSlot()));
-        return toResponse(scheduleRepository.save(schedule));
+        schedule.setNextExecutionTime(calculateNextExecutionTime(request.getTradeDate(), request.getSessionSlot(), request.getScheduledTime()));
+        TradingSchedule saved = scheduleRepository.save(schedule);
+        log.info("Rescheduled id={} symbol={} side={} qty={} date={} slot={} manualTime={} next={} limit={} autoRepeat={} cancelBefore={}",
+                scheduleId,
+                saved.getTradingsymbol(),
+                saved.getSide(),
+                saved.getQuantity(),
+                saved.getTradeDate(),
+                saved.getSessionSlot(),
+                request.getScheduledTime(),
+                saved.getNextExecutionTime(),
+                saved.getLimitPrice(),
+                saved.isAutoRepeat(),
+                saved.isCancelOpenOrdersBeforeExecution());
+        return toResponse(saved);
     }
 
     @Transactional
@@ -138,12 +163,13 @@ public class ScheduleService {
         next.setAutoRepeat(schedule.isAutoRepeat());
         next.setCancelOpenOrdersBeforeExecution(schedule.isCancelOpenOrdersBeforeExecution());
         next.setStatus(ScheduleStatus.SCHEDULED);
-        next.setNextExecutionTime(calculateNextExecutionTime(next.getTradeDate(), next.getSessionSlot()));
+        next.setNextExecutionTime(calculateNextExecutionTime(next.getTradeDate(), next.getSessionSlot(), null));
         return scheduleRepository.save(next);
     }
 
-    public ZonedDateTime calculateNextExecutionTime(LocalDate date, SessionSlot session) {
-        ZonedDateTime scheduled = ZonedDateTime.of(date, session.getTime(), clock.zoneId());
+    public ZonedDateTime calculateNextExecutionTime(LocalDate date, SessionSlot session, java.time.LocalTime override) {
+        java.time.LocalTime time = override != null ? override : session.getTime();
+        ZonedDateTime scheduled = ZonedDateTime.of(date, time, clock.zoneId());
         if (scheduled.isBefore(clock.now())) {
             throw new IllegalArgumentException("Scheduled time is in the past");
         }
@@ -165,7 +191,8 @@ public class ScheduleService {
         response.setSide(schedule.getSide());
         response.setStatus(schedule.getStatus());
         response.setSessionSlot(schedule.getSessionSlot());
-        response.setSessionTimeIst(schedule.getSessionSlot().getTime().format(TIME_FMT));
+        // Show actual scheduled time (manual or slot time)
+        response.setSessionTimeIst(schedule.getNextExecutionTime() != null ? schedule.getNextExecutionTime().toLocalTime().format(TIME_FMT) : schedule.getSessionSlot().getTime().format(TIME_FMT));
         response.setTradeDateIst(schedule.getTradeDate().format(DATE_FMT));
         response.setNextExecutionTime(schedule.getNextExecutionTime());
         response.setLastExecutedAt(schedule.getLastExecutedAt());

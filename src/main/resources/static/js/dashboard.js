@@ -6,7 +6,8 @@ const state = {
     depthHandle: null,
     sessionHandle: null,
     holdingsFilter: 'ALL',
-    sessionActive: false
+    sessionActive: false,
+    selectedSymbol: null
 };
 
 const STATUS = {
@@ -104,12 +105,15 @@ async function refreshDepth() {
     try {
         const depths = await fetchJson(`/api/depth/${state.currentUser}`);
         renderDepth(depths);
+        renderDepthPanels(depths);
     } catch (err) {
         console.warn('Depth refresh failed', err);
         const table = document.getElementById('depth-table');
         if (table) {
             table.innerHTML = '<tr><td colspan="6" class="text-muted">Market depth unavailable. Click Refresh to retry.</td></tr>';
         }
+        const panels = document.getElementById('depth-panels');
+        if (panels) panels.innerHTML = '<div class="et-depth-muted">Market depth unavailable. Click Refresh to retry.</div>';
     }
 }
 
@@ -187,7 +191,7 @@ function renderExecuted(executed) {
                     </div>
                     <p class="card-text small-note">Last Exec: ${schedule.lastExecutedAt ?? 'N/A'}</p>
                     <p class="card-text small-note">Message: ${schedule.lastExecutionMessage ?? 'N/A'}</p>
-                    <button class="btn btn-sm btn-outline-light" data-action="repeat" data-id="${schedule.id}">Repeat Tomorrow</button>
+                    <button class="btn btn-sm btn-outline-warning" data-action="repeat" data-id="${schedule.id}">Repeat Tomorrow</button>
                 </div>
             </div>`;
         container.appendChild(col);
@@ -256,24 +260,111 @@ function renderHoldings(holdings) {
 }
 
 function renderDepth(depths) {
+    // Back-compat: if table exists, keep simple rendering
     const table = document.getElementById('depth-table');
-    table.innerHTML = '';
-    if (!depths || depths.length === 0) {
-        table.innerHTML = '<tr><td colspan="6" class="text-muted">No data</td></tr>';
+    if (table) {
+        table.innerHTML = '';
+        if (!depths || depths.length === 0) {
+            table.innerHTML = '<tr><td colspan="6" class="text-muted">No data</td></tr>';
+        } else {
+            depths.forEach(entry => {
+                const pressure = formatPressure(entry.buyQuantity || 0, entry.sellQuantity || 0);
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${entry.tradingsymbol}</td>
+                    <td>${entry.buyQuantity ?? 0}</td>
+                    <td>${entry.sellQuantity ?? 0}</td>
+                    <td>${pressure}</td>
+                    <td>${entry.ltp ?? '-'}</td>
+                    <td>${entry.capturedAt ?? '-'}</td>`;
+                table.appendChild(row);
+            });
+        }
+    }
+    // New depth detail panel
+    renderDepthPanel(depths);
+}
+
+function normalizeSymbol(sym){
+    if(!sym) return sym;
+    const idx = sym.indexOf(':');
+    return idx > -1 ? sym.substring(idx+1) : sym;
+}
+
+function renderDepthPanels(depths){
+    const container = document.getElementById('depth-panels');
+    if(!container) return;
+    container.innerHTML = '';
+    const user = state.users.find(u => u.username === state.currentUser);
+    const holdings = (user?.holdings || []).map(h => (h || '').split('|')[0]).filter(Boolean);
+    const filter = state.holdingsFilter;
+    const filtered = holdings.filter(h => {
+        const exch = h.includes(':') ? h.split(':')[0].toUpperCase() : null;
+        return filter === 'ALL' || exch === filter;
+    });
+    if(filtered.length === 0){
+        container.innerHTML = '<div class="et-depth-muted">No holdings to show.</div>';
         return;
     }
-    depths.forEach(entry => {
-        const pressure = formatPressure(entry.buyQuantity || 0, entry.sellQuantity || 0);
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${entry.tradingsymbol}</td>
-            <td>${entry.buyQuantity ?? 0}</td>
-            <td>${entry.sellQuantity ?? 0}</td>
-            <td>${pressure}</td>
-            <td>${entry.ltp ?? '-'}</td>
-            <td>${entry.capturedAt ?? '-'}</td>`;
-        table.appendChild(row);
+    const bySymbol = new Map();
+    (depths||[]).forEach(d => bySymbol.set(normalizeSymbol(d.tradingsymbol), d));
+    filtered.forEach(h => {
+        const sym = normalizeSymbol(h);
+        const entry = bySymbol.get(sym);
+        container.appendChild(buildDepthCard(sym, entry));
     });
+}
+
+function buildDepthCard(symbol, entry){
+    const card = document.createElement('div');
+    card.className = 'et-depth-panel small';
+    const buy = entry?.buyQuantity || 0;
+    const sell = entry?.sellQuantity || 0;
+    const pressure = formatPressure(buy, sell);
+    const ltp = entry?.ltp ?? '-';
+    const ts = entry?.capturedAt ?? '-';
+    const buys = Array.isArray(entry?.buyLevels) ? entry.buyLevels : [];
+    const sells = Array.isArray(entry?.sellLevels) ? entry.sellLevels : [];
+    const rows = Math.max(buys.length, sells.length, 5);
+    let ladder = '';
+    for (let i=0;i<rows;i++){
+        const b = buys[i] || {}; const s = sells[i] || {};
+        ladder += `<tr>
+            <td class="et-bid">${b.price ?? ''}</td>
+            <td class="et-bid">${b.orders ?? ''}</td>
+            <td class="et-bid">${b.quantity ?? ''}</td>
+            <td class="et-ask">${s.price ?? ''}</td>
+            <td class="et-ask">${s.orders ?? ''}</td>
+            <td class="et-ask">${s.quantity ?? ''}</td>
+        </tr>`;
+    }
+    card.innerHTML = `
+        <div class="et-depth-header">
+            <div class="et-depth-symbol">${symbol}</div>
+            <div class="et-depth-price">${ltp}</div>
+        </div>
+        <table class="et-depth-ladder">
+            <thead>
+                <tr><th colspan="3">Bid</th><th colspan="3">Offer</th></tr>
+                <tr><th>Price</th><th>Orders</th><th>Qty</th><th>Price</th><th>Orders</th><th>Qty</th></tr>
+            </thead>
+            <tbody>${ladder}</tbody>
+        </table>
+        <div class="et-depth-meta">
+            <div class="meta"><span class="et-depth-muted">Open:</span> ${entry?.open ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Prev. Close:</span> ${entry?.prevClose ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Low:</span> ${entry?.low ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">High:</span> ${entry?.high ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Volume:</span> ${entry?.volume ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Avg. price:</span> ${entry?.avgPrice ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Lower circuit:</span> ${entry?.lowerCircuit ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Upper circuit:</span> ${entry?.upperCircuit ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">LTQ:</span> ${entry?.ltq ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">LTT:</span> ${entry?.ltt ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Pressure:</span> ${pressure}</div>
+            <div class="meta"><span class="et-depth-muted">Updated:</span> ${ts}</div>
+        </div>`;
+    return card;
 }
 
 function presetSchedule(holding) {
@@ -284,6 +375,9 @@ function presetSchedule(holding) {
     if (token) document.getElementById('instrumentToken').value = token;
     if (qty != null && !Number.isNaN(qty)) document.getElementById('quantity').value = qty;
     document.getElementById('instrumentToken').focus();
+    // Also select for depth panel
+    state.selectedSymbol = symbol;
+    refreshDepth();
 }
 
 async function handleScheduleAction(event) {
@@ -404,6 +498,8 @@ function setupFormHandlers() {
             form.classList.add('was-validated');
             return;
         }
+        const manualEnabled = document.getElementById('manual-mode-toggle')?.checked;
+        const manualTime = document.getElementById('manualTime')?.value;
         const payload = {
             tradingsymbol: document.getElementById('tradingsymbol').value.trim().toUpperCase(),
             instrumentToken: document.getElementById('instrumentToken').value.trim(),
@@ -413,7 +509,8 @@ function setupFormHandlers() {
             tradeDate: document.getElementById('tradeDate').value,
             limitPrice: document.getElementById('limitPrice').value ? Number(document.getElementById('limitPrice').value) : null,
             autoRepeat: document.getElementById('autoRepeat').checked,
-            cancelOpenOrdersBeforeExecution: document.getElementById('cancelOrders').checked
+            cancelOpenOrdersBeforeExecution: document.getElementById('cancelOrders').checked,
+            scheduledTime: (manualEnabled && manualTime) ? manualTime + ':00' : null
         };
         try {
             await fetchJson(`/api/schedules/${state.currentUser}`, {
@@ -427,6 +524,20 @@ function setupFormHandlers() {
             alert(err.message || 'Failed to schedule');
         }
     });
+
+    // Manual scheduling toggle
+    const manualToggle = document.getElementById('manual-mode-toggle');
+    const manualTimeInput = document.getElementById('manualTime');
+    if (manualToggle && manualTimeInput) {
+        manualToggle.addEventListener('change', () => {
+            manualTimeInput.disabled = !manualToggle.checked;
+            if (manualToggle.checked && !manualTimeInput.value) {
+                const now = new Date();
+                now.setMinutes(now.getMinutes() + 1);
+                manualTimeInput.value = now.toTimeString().slice(0,5);
+            }
+        });
+    }
 
     document.getElementById('logging-toggle').addEventListener('change', async (event) => {
         await fetch(`/api/admin/logging/${state.currentUser}`, {
