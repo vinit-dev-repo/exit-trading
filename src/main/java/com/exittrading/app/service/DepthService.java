@@ -54,4 +54,30 @@ public class DepthService {
                     return view;
                 }).collect(Collectors.toList());
     }
+
+    /**
+     * Returns latest persisted snapshots; if none exist yet for the user,
+     * fetch a small live sample using the configured gateway based on the
+     * user's holdings. This makes the UI useful even before any orders run.
+     */
+    public List<DepthView> latestOrLive(UserAccount user) {
+        List<DepthView> persisted = latest(user);
+        if (!persisted.isEmpty()) {
+            return persisted;
+        }
+        // Fallback: fetch up to 5 live depths from holdings
+        return user.getHoldings().stream()
+                .filter(sym -> sym != null && !sym.isBlank())
+                .limit(5)
+                .map(sym -> {
+                    String symbolOnly = sym;
+                    int idx = sym.indexOf(':');
+                    if (idx > -1 && idx + 1 < sym.length()) {
+                        symbolOnly = sym.substring(idx + 1);
+                    }
+                    return gateway.fetchDepth(symbolOnly, null);
+                })
+                .map(java.util.concurrent.CompletableFuture::join)
+                .collect(Collectors.toList());
+    }
 }

@@ -106,6 +106,10 @@ async function refreshDepth() {
         renderDepth(depths);
     } catch (err) {
         console.warn('Depth refresh failed', err);
+        const table = document.getElementById('depth-table');
+        if (table) {
+            table.innerHTML = '<tr><td colspan="6" class="text-muted">Market depth unavailable. Click Refresh to retry.</td></tr>';
+        }
     }
 }
 
@@ -119,23 +123,26 @@ function renderSchedules(schedules) {
     schedules.forEach(schedule => {
         const col = document.createElement('div');
         col.className = 'col-md-6 col-xl-4';
-        const limit = schedule.limitPrice != null ? `<span class=\"badge bg-secondary\">Limit: ${schedule.limitPrice}</span>` : '';
+        const priceChip = schedule.limitPrice != null && schedule.limitPrice !== ''
+            ? `<span class=\"badge bg-secondary\">Limit: ${schedule.limitPrice}</span>`
+            : '<span class=\"badge bg-secondary\">Market</span>';
         const auto = schedule.autoRepeat ? `<span class=\"badge bg-warning text-dark\">Auto Repeat</span>` : '';
         col.innerHTML = `
             <div class="card schedule-tile bg-dark border-light">
                 <div class="card-body">
-                    <h5 class="card-title">
-                        <span>${schedule.tradingsymbol}</span>
+                    <div class="schedule-head">
                         <span class="badge bg-primary">${schedule.side}</span>
-                    </h5>
+                    </div>
+                    <div class="schedule-symbol">${schedule.tradingsymbol}</div>
                     <div class="schedule-meta">
                         <span class="badge bg-secondary">Qty: ${schedule.quantity}</span>
-                        <span class="badge bg-secondary">Session: ${schedule.sessionTimeIst}</span>
+                        ${priceChip}
+                    </div>
+                    <div class="schedule-meta">
                         <span class="badge bg-secondary">Date: ${schedule.tradeDateIst}</span>
-                        ${limit}
+                        <span class="badge bg-secondary">Session: ${schedule.sessionTimeIst}</span>
                         ${auto}
                     </div>
-                    <p class="card-text small-note">Next: ${schedule.nextExecutionTime ?? 'Pending'}</p>
                     <div class="d-flex gap-2">
                         <button class="btn btn-sm btn-outline-danger" data-action="cancel" data-id="${schedule.id}">Cancel</button>
                         <button class="btn btn-sm btn-outline-warning" data-action="repeat" data-id="${schedule.id}">Repeat Tomorrow</button>
@@ -161,15 +168,21 @@ function renderExecuted(executed) {
         const col = document.createElement('div');
         col.className = 'col-md-6 col-xl-4';
         const auto = schedule.autoRepeat ? '<span class="badge bg-warning text-dark">Auto Repeat</span>' : '';
+        const priceChip = schedule.limitPrice != null && schedule.limitPrice !== ''
+            ? `<span class=\"badge bg-dark\">Limit: ${schedule.limitPrice}</span>`
+            : '<span class=\"badge bg-dark\">Market</span>';
         col.innerHTML = `
             <div class="card bg-secondary schedule-tile">
                 <div class="card-body">
-                    <h5 class="card-title">
-                        <span>${schedule.tradingsymbol}</span>
-                        <span class="badge ${badgeClass}">${schedule.status}</span>
-                    </h5>
+                    <div class="schedule-head">
+                        <span class="badge bg-primary">${schedule.side ?? '-'}</span>
+                    </div>
+                    <div class="schedule-symbol">${schedule.tradingsymbol}</div>
                     <div class="schedule-meta">
+                        <span class="badge bg-dark">Qty: ${schedule.quantity ?? '-'}</span>
                         <span class="badge bg-dark">Session: ${schedule.sessionTimeIst}</span>
+                        <span class="badge ${badgeClass}">${schedule.status}</span>
+                        ${priceChip}
                         ${auto}
                     </div>
                     <p class="card-text small-note">Last Exec: ${schedule.lastExecutedAt ?? 'N/A'}</p>

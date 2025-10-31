@@ -35,10 +35,17 @@
 
 /* Tighter card body and readable compact meta chips */
 .schedule-tile .card-body { padding: .75rem .75rem; }
-.schedule-tile .card-title { font-size: 1rem; margin-bottom: .35rem; display:flex; align-items:center; justify-content:space-between; }
+.schedule-tile .card-title { font-size: 1rem; margin-bottom: .35rem; display:flex; flex-direction:column; align-items:flex-start; gap:.35rem; }
+.schedule-tile .card-title > span.badge { order:1; align-self:flex-start; }
+.schedule-tile .card-title > span:first-child:not(.badge) { display:none; }
+.schedule-symbol { font-weight:600; letter-spacing:.2px; margin-bottom:.25rem; }
 .schedule-meta { display:flex; flex-wrap:wrap; gap:.35rem; margin-bottom:.35rem; }
 .schedule-meta .badge { font-size:.75rem; font-weight:500; }
 .schedule-tile .card-text.small-note { font-size:.8rem; color:#adb5bd; margin-bottom:.35rem; }
+
+/* Header row layout like mock */
+.schedule-head { display:flex; align-items:center; justify-content:flex-start; gap:.5rem; margin-bottom:.35rem; }
+.schedule-symbol { font-weight:600; letter-spacing:.2px; margin-bottom:.25rem; }
 
 /* Professional holding chip styling */
 .holding-chip { background:#f8f9fa; color:#212529; border:1px solid rgba(0,0,0,.125); border-radius: 8px; padding:8px 12px; margin:4px; cursor:pointer; min-width:140px; }
