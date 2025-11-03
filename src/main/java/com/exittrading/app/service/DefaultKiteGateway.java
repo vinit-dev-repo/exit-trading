@@ -259,11 +259,50 @@ public class DefaultKiteGateway implements KiteGateway {
                         ? tradingsymbol
                         : (exchange + ":" + tradingsymbol);
                 Method getQuote = kite.getClass().getMethod("getQuote", String[].class);
-                String key = (instrumentToken != null && !instrumentToken.isBlank()) ? instrumentToken : instrument;
-                // Query using both token and instrument if we have them
-                String[] queryKeys = key.equals(instrument) ? new String[]{ key } : new String[]{ key, instrument };
-                log.info("Depth fetch keys={} token={} instrument={}", java.util.Arrays.toString(queryKeys), instrumentToken, instrument);
-                Object depthResult = getQuote.invoke(kite, (Object) queryKeys);
+                // Strategy: try EXCH:SYMBOL first; if fails, try token; if that fails, try resolved token; finally, fallback to LTP
+                Map<?,?> depthMap = null;
+                Exception lastErr = null;
+                // 1) try by instrument
+                try {
+                    log.info("Depth fetch by instrument: {}", instrument);
+                    Object res = getQuote.invoke(kite, (Object) new String[]{ instrument });
+                    if (res == null) {
+                        log.warn("Depth getQuote returned null for instrument {}", instrument);
+                    } else {
+                        log.info("Depth getQuote(instrument) returned {}", res.getClass().getName());
+                        if (res instanceof Map<?,?> m) depthMap = m; else lastErr = new RuntimeException("Non-map response");
+                    }
+                } catch (Exception e) { lastErr = e; }
+                // 2) try by provided token
+                if (depthMap == null && instrumentToken != null && !instrumentToken.isBlank()) {
+                    try {
+                        log.info("Depth fetch by token: {}", instrumentToken);
+                        Object res = getQuote.invoke(kite, (Object) new String[]{ instrumentToken });
+                        if (res == null) {
+                            log.warn("Depth getQuote returned null for token {}", instrumentToken);
+                        } else {
+                            log.info("Depth getQuote(token) returned {}", res.getClass().getName());
+                            if (res instanceof Map<?,?> m) depthMap = m; else lastErr = new RuntimeException("Non-map response");
+                        }
+                    } catch (Exception e) { lastErr = e; }
+                }
+                // 3) try resolved token
+                String resolvedToken = null;
+                if (depthMap == null) {
+                    try {
+                        resolvedToken = resolveInstrumentToken(kite, instrument);
+                        if (resolvedToken != null) {
+                            log.info("Depth fetch by resolved token: {} for {}", resolvedToken, instrument);
+                            Object res = getQuote.invoke(kite, (Object) new String[]{ resolvedToken });
+                            if (res == null) {
+                                log.warn("Depth getQuote returned null for resolved token {}", resolvedToken);
+                            } else {
+                                log.info("Depth getQuote(resolved token) returned {}", res.getClass().getName());
+                                if (res instanceof Map<?,?> m) depthMap = m; else lastErr = new RuntimeException("Non-map response");
+                            }
+                        }
+                    } catch (Exception e) { lastErr = e; }
+                }
                 DepthView view = new DepthView();
                 String viewSymbol = tradingsymbol;
                 int colon = viewSymbol != null ? viewSymbol.indexOf(':') : -1;
@@ -271,80 +310,140 @@ public class DefaultKiteGateway implements KiteGateway {
                     viewSymbol = viewSymbol.substring(colon + 1);
                 }
                 view.setTradingsymbol(viewSymbol);
-                if (depthResult instanceof Map<?, ?> depthMap) {
+                if (depthMap != null) {
                     log.info("Depth map size={} keys={}", depthMap.size(), depthMap.keySet());
-                    Object quote = depthMap.get(key);
-                    if (quote == null && depthMap.size() > 0) {
-                        // Try the alternate key (instrument) if token lookup failed
-                        quote = depthMap.get(instrument);
-                    }
-                    if (quote == null && (instrumentToken == null || instrumentToken.isBlank())) {
-                        // Try to resolve token for EXCH:SYMBOL and retry once
-                        try {
-                            String resolved = resolveInstrumentToken(kite, instrument);
-                            if (resolved != null) {
-                                depthResult = getQuote.invoke(kite, (Object) new String[]{resolved, instrument});
-                                Map<?,?> m = (Map<?,?>) depthResult;
-                                quote = m.get(resolved);
-                                if (quote == null) quote = m.get(instrument);
-                                key = resolved;
-                                log.info("Depth retry with resolved token {} => hit={}", resolved, quote != null);
-                            }
-                        } catch (Exception ignore) {}
-                    }
+                    Object quote = null;
+                    if (instrumentToken != null && !instrumentToken.isBlank()) quote = depthMap.get(instrumentToken);
+                    if (quote == null && resolvedToken != null) quote = depthMap.get(resolvedToken);
+                    if (quote == null) quote = depthMap.get(instrument);
+                    if (quote == null && !depthMap.isEmpty()) quote = depthMap.values().iterator().next();
                     if (quote != null) {
-                        Class<?> quoteClass = quote.getClass();
-                        Object depth = getField(quoteClass, quote, "depth");
-                        if (depth != null) {
-                            Class<?> depthClass = depth.getClass();
-                            Object buyLevels = getField(depthClass, depth, "buy");
-                            Object sellLevels = getField(depthClass, depth, "sell");
-                            long buyQty = aggregateDepth(buyLevels);
-                            long sellQty = aggregateDepth(sellLevels);
-                            view.setBuyQuantity(buyQty);
-                            view.setSellQuantity(sellQty);
-
-                            // Map top 5 levels into DTO if available
-                            view.setBuyLevels(mapLevels(buyLevels));
-                            view.setSellLevels(mapLevels(sellLevels));
+                        // Handle both strongly-typed Quote and Map-backed (LinkedTreeMap) responses
+                        if (quote instanceof java.util.Map<?,?> qmap) {
+                            Object depthObj = qmap.get("depth");
+                            if (depthObj instanceof java.util.Map<?,?> dmap) {
+                                Object buyLevels = dmap.get("buy");
+                                Object sellLevels = dmap.get("sell");
+                                long buyQty = aggregateDepth(buyLevels);
+                                long sellQty = aggregateDepth(sellLevels);
+                                view.setBuyQuantity(buyQty);
+                                view.setSellQuantity(sellQty);
+                                view.setBuyLevels(mapLevels(buyLevels));
+                                view.setSellLevels(mapLevels(sellLevels));
+                            }
+                            Number lastPrice = asNumber(qmap.get("lastPrice"));
+                            if (lastPrice == null) lastPrice = asNumber(qmap.get("lastTradedPrice"));
+                            if (lastPrice != null) view.setLtp(BigDecimal.valueOf(lastPrice.doubleValue()));
+                            Object ohlc = qmap.get("ohlc");
+                            if (ohlc instanceof java.util.Map<?,?> omap) {
+                                Number open = asNumber(omap.get("open"));
+                                Number high = asNumber(omap.get("high"));
+                                Number low = asNumber(omap.get("low"));
+                                Number close = asNumber(omap.get("close"));
+                                if (open != null) view.setOpen(BigDecimal.valueOf(open.doubleValue()));
+                                if (high != null) view.setHigh(BigDecimal.valueOf(high.doubleValue()));
+                                if (low != null) view.setLow(BigDecimal.valueOf(low.doubleValue()));
+                                if (close != null) view.setPrevClose(BigDecimal.valueOf(close.doubleValue()));
+                            }
+                            Number vol = asNumber(qmap.get("volumeTradedToday"));
+                            if (vol == null) vol = asNumber(qmap.get("volume"));
+                            if (vol != null) view.setVolume(vol.longValue());
+                            Number avg = asNumber(qmap.get("averagePrice"));
+                            if (avg != null) view.setAvgPrice(BigDecimal.valueOf(avg.doubleValue()));
+                            Number lcl = asNumber(qmap.get("lowerCircuitLimit"));
+                            if (lcl != null) view.setLowerCircuit(BigDecimal.valueOf(lcl.doubleValue()));
+                            Number ucl = asNumber(qmap.get("upperCircuitLimit"));
+                            if (ucl != null) view.setUpperCircuit(BigDecimal.valueOf(ucl.doubleValue()));
+                            Number ltq = asNumber(qmap.get("lastTradedQuantity"));
+                            if (ltq == null) ltq = asNumber(qmap.get("lastQuantity"));
+                            if (ltq != null) view.setLtq(ltq.longValue());
+                            Object ltt = qmap.get("lastTradedTime");
+                            if (ltt == null) ltt = qmap.get("timestamp");
+                            if (ltt != null) view.setLtt(String.valueOf(ltt));
+                        } else {
+                            Class<?> quoteClass = quote.getClass();
+                            Object depth = getField(quoteClass, quote, "depth");
+                            if (depth != null) {
+                                Class<?> depthClass = depth.getClass();
+                                Object buyLevels = getField(depthClass, depth, "buy");
+                                Object sellLevels = getField(depthClass, depth, "sell");
+                                long buyQty = aggregateDepth(buyLevels);
+                                long sellQty = aggregateDepth(sellLevels);
+                                view.setBuyQuantity(buyQty);
+                                view.setSellQuantity(sellQty);
+                                view.setBuyLevels(mapLevels(buyLevels));
+                                view.setSellLevels(mapLevels(sellLevels));
+                            }
+                            Number lastPrice = (Number) getField(quoteClass, quote, "lastPrice");
+                            if (lastPrice == null) lastPrice = (Number) getField(quoteClass, quote, "lastTradedPrice");
+                            if (lastPrice != null) view.setLtp(BigDecimal.valueOf(lastPrice.doubleValue()));
+                            Object ohlc = getField(quoteClass, quote, "ohlc");
+                            if (ohlc != null) {
+                                Number open = (Number) getField(ohlc.getClass(), ohlc, "open");
+                                Number high = (Number) getField(ohlc.getClass(), ohlc, "high");
+                                Number low = (Number) getField(ohlc.getClass(), ohlc, "low");
+                                Number close = (Number) getField(ohlc.getClass(), ohlc, "close");
+                                if (open != null) view.setOpen(BigDecimal.valueOf(open.doubleValue()));
+                                if (high != null) view.setHigh(BigDecimal.valueOf(high.doubleValue()));
+                                if (low != null) view.setLow(BigDecimal.valueOf(low.doubleValue()));
+                                if (close != null) view.setPrevClose(BigDecimal.valueOf(close.doubleValue()));
+                            }
+                            Number vol = (Number) getField(quoteClass, quote, "volumeTradedToday");
+                            if (vol == null) vol = (Number) getField(quoteClass, quote, "volume");
+                            if (vol != null) view.setVolume(vol.longValue());
+                            Number avg = (Number) getField(quoteClass, quote, "averagePrice");
+                            if (avg != null) view.setAvgPrice(BigDecimal.valueOf(avg.doubleValue()));
+                            Number lcl = (Number) getField(quoteClass, quote, "lowerCircuitLimit");
+                            if (lcl != null) view.setLowerCircuit(BigDecimal.valueOf(lcl.doubleValue()));
+                            Number ucl = (Number) getField(quoteClass, quote, "upperCircuitLimit");
+                            if (ucl != null) view.setUpperCircuit(BigDecimal.valueOf(ucl.doubleValue()));
+                            Number ltq = (Number) getField(quoteClass, quote, "lastTradedQuantity");
+                            if (ltq == null) ltq = (Number) getField(quoteClass, quote, "lastQuantity");
+                            if (ltq != null) view.setLtq(ltq.longValue());
+                            Object ltt = getField(quoteClass, quote, "lastTradedTime");
+                            if (ltt == null) ltt = getField(quoteClass, quote, "timestamp");
+                            if (ltt != null) view.setLtt(String.valueOf(ltt));
                         }
-                        Number lastPrice = (Number) getField(quoteClass, quote, "lastPrice");
-                        if (lastPrice == null) {
-                            lastPrice = (Number) getField(quoteClass, quote, "lastTradedPrice");
-                        }
-                        if (lastPrice != null) {
-                            view.setLtp(BigDecimal.valueOf(lastPrice.doubleValue()));
-                        }
-                        // Summary values
-                        Object ohlc = getField(quoteClass, quote, "ohlc");
-                        if (ohlc != null) {
-                            Number open = (Number) getField(ohlc.getClass(), ohlc, "open");
-                            Number high = (Number) getField(ohlc.getClass(), ohlc, "high");
-                            Number low = (Number) getField(ohlc.getClass(), ohlc, "low");
-                            Number close = (Number) getField(ohlc.getClass(), ohlc, "close");
-                            if (open != null) view.setOpen(BigDecimal.valueOf(open.doubleValue()));
-                            if (high != null) view.setHigh(BigDecimal.valueOf(high.doubleValue()));
-                            if (low != null) view.setLow(BigDecimal.valueOf(low.doubleValue()));
-                            if (close != null) view.setPrevClose(BigDecimal.valueOf(close.doubleValue()));
-                        }
-                        Number vol = (Number) getField(quoteClass, quote, "volumeTradedToday");
-                        if (vol == null) vol = (Number) getField(quoteClass, quote, "volume");
-                        if (vol != null) view.setVolume(vol.longValue());
-                        Number avg = (Number) getField(quoteClass, quote, "averagePrice");
-                        if (avg != null) view.setAvgPrice(BigDecimal.valueOf(avg.doubleValue()));
-                        Number lcl = (Number) getField(quoteClass, quote, "lowerCircuitLimit");
-                        if (lcl != null) view.setLowerCircuit(BigDecimal.valueOf(lcl.doubleValue()));
-                        Number ucl = (Number) getField(quoteClass, quote, "upperCircuitLimit");
-                        if (ucl != null) view.setUpperCircuit(BigDecimal.valueOf(ucl.doubleValue()));
-                        Number ltq = (Number) getField(quoteClass, quote, "lastTradedQuantity");
-                        if (ltq == null) ltq = (Number) getField(quoteClass, quote, "lastQuantity");
-                        if (ltq != null) view.setLtq(ltq.longValue());
-                        Object ltt = getField(quoteClass, quote, "lastTradedTime");
-                        if (ltt == null) ltt = getField(quoteClass, quote, "timestamp");
-                        if (ltt != null) view.setLtt(String.valueOf(ltt));
                     } else {
-                        log.warn("Depth fetch returned no quote for keys token={} instrument={}", instrumentToken, instrument);
+                        log.warn("Depth fetch returned empty map for {} / token {} (resolved {})", instrument, instrumentToken, resolvedToken);
                     }
+                } else {
+                    // Fallback: try LTP/ OHLC so panel isn’t empty
+                    try {
+                        Method getLTP = kite.getClass().getMethod("getLTP", String[].class);
+                        Object res = getLTP.invoke(kite, (Object) new String[]{ instrument });
+                        if (res instanceof Map<?,?> m) {
+                            Object q = m.get(instrument);
+                            if (q != null) {
+                                Class<?> qc = q.getClass();
+                                Number last = (Number) getField(qc, q, "lastPrice");
+                                if (last != null) view.setLtp(BigDecimal.valueOf(last.doubleValue()));
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    // Try OHLC for open/high/low/close
+                    try {
+                        Method getOHLC = kite.getClass().getMethod("getOHLC", String[].class);
+                        Object res = getOHLC.invoke(kite, (Object) new String[]{ instrument });
+                        if (res instanceof Map<?,?> m) {
+                            Object q = m.get(instrument);
+                            if (q != null) {
+                                Class<?> qc = q.getClass();
+                                Object ohlc = getField(qc, q, "ohlc");
+                                if (ohlc != null) {
+                                    Number open = (Number) getField(ohlc.getClass(), ohlc, "open");
+                                    Number high = (Number) getField(ohlc.getClass(), ohlc, "high");
+                                    Number low = (Number) getField(ohlc.getClass(), ohlc, "low");
+                                    Number close = (Number) getField(ohlc.getClass(), ohlc, "close");
+                                    if (open != null) view.setOpen(BigDecimal.valueOf(open.doubleValue()));
+                                    if (high != null) view.setHigh(BigDecimal.valueOf(high.doubleValue()));
+                                    if (low != null) view.setLow(BigDecimal.valueOf(low.doubleValue()));
+                                    if (close != null) view.setPrevClose(BigDecimal.valueOf(close.doubleValue()));
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    log.warn("Depth fetch failed for {}. Last error: {}", tradingsymbol, lastErr != null ? lastErr.getMessage() : "n/a");
                 }
                 view.setCapturedAt(clock.now());
                 return view;
@@ -414,9 +513,9 @@ public class DefaultKiteGateway implements KiteGateway {
             for (int i = 0; i < n; i++) {
                 Object lv = list.get(i);
                 Class<?> t = lv.getClass();
-                Number qty = (Number) getField(t, lv, "quantity");
-                Number price = (Number) getField(t, lv, "price");
-                Number orders = (Number) getField(t, lv, "orders");
+                Number qty = (lv instanceof Map<?,?> m) ? asNumber(m.get("quantity")) : (Number) getField(t, lv, "quantity");
+                Number price = (lv instanceof Map<?,?> m) ? asNumber(m.get("price")) : (Number) getField(t, lv, "price");
+                Number orders = (lv instanceof Map<?,?> m) ? asNumber(m.get("orders")) : (Number) getField(t, lv, "orders");
                 out.add(new DepthView.Level(qty != null ? qty.intValue() : 0,
                         price != null ? price.doubleValue() : 0.0,
                         orders != null ? orders.intValue() : 0));
@@ -425,6 +524,11 @@ public class DefaultKiteGateway implements KiteGateway {
         } catch (Exception e) {
             return Collections.emptyList();
         }
+    }
+
+    private Number asNumber(Object o) {
+        if (o instanceof Number n) return n;
+        try { return o != null ? new java.math.BigDecimal(String.valueOf(o)) : null; } catch (Exception e) { return null; }
     }
 
     private void setField(Class<?> type, Object target, String fieldName, Object value) throws Exception {

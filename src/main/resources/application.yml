@@ -32,8 +32,8 @@ logging:
     name: logs/exittrading.log
 
 kite:
-  apiKey: nhc6dvd6ju9ns5we
-  apiSecret: q1twavhjsrkud3g04i7obe4w3dm6nmsr
+  apiKey: 12lhsd5n9elnyupj
+  apiSecret: 55eaoudfzhyogeqp68xnhkaingpv6dsd
   default:
     exchange: BSE
 

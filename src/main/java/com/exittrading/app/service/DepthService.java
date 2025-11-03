@@ -31,6 +31,18 @@ public class DepthService {
         }
     }
 
+    /**
+     * Ad-hoc depth fetch for diagnostics. Accepts either EXCH:SYMBOL or plain symbol.
+     * If token is provided, it is preferred by the gateway.
+     */
+    public DepthView fetchOne(String instrumentOrSymbol, String token) {
+        try {
+            return gateway.fetchDepth(instrumentOrSymbol, token).join();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     @Transactional
     public void persistDepth(UserAccount user, DepthView view) {
         if (view == null) {

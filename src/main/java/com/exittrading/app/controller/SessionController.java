@@ -2,6 +2,7 @@ package com.exittrading.app.controller;
 
 import com.exittrading.app.service.IstClock;
 import com.exittrading.app.service.AdminService;
+import com.exittrading.app.service.DepthStreamService;
 import org.springframework.beans.factory.annotation.Autowired;
 import com.exittrading.app.service.KiteSessionManager;
 import org.slf4j.Logger;
@@ -26,6 +27,7 @@ public class SessionController {
     private final KiteSessionManager sessionManager;
     private final IstClock clock;
     private final AdminService adminService;
+    private final DepthStreamService depthStreamService;
 
     @Value("${kite.apiKey}")
     private String apiKey;
@@ -37,15 +39,16 @@ public class SessionController {
     private String defaultExchange;
 
     @Autowired
-    public SessionController(KiteSessionManager sessionManager, IstClock clock, AdminService adminService) {
+    public SessionController(KiteSessionManager sessionManager, IstClock clock, AdminService adminService, DepthStreamService depthStreamService) {
         this.sessionManager = sessionManager;
         this.clock = clock;
         this.adminService = adminService;
+        this.depthStreamService = depthStreamService;
     }
 
     // Backward-compatible constructor for existing tests
     public SessionController(KiteSessionManager sessionManager, IstClock clock) {
-        this(sessionManager, clock, null);
+        this(sessionManager, clock, null, null);
     }
 
     @PostMapping("/login")
@@ -203,6 +206,15 @@ public class SessionController {
             adminService.ensureUserExists(userName, userName);
             // Best-effort holdings sync so UI shows actual holdings for this user
             try { syncHoldingsFromKite(kite, userName); } catch (Exception ignored) { }
+        }
+        // Start market depth streaming (best effort)
+        try {
+            if (adminService != null && depthStreamService != null) {
+                var userAccount = adminService.findByUsername(userName);
+                depthStreamService.startForUser(userAccount);
+            }
+        } catch (Exception ex) {
+            log.warn("Depth streaming start failed: {}", ex.getMessage());
         }
         return new LoginResult(userName, expiry);
     }

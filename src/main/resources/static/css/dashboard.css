@@ -100,7 +100,7 @@
 .app-header .status-wrap{margin-right:200px;}
 
 /* Depth detail panel (mocked like screenshot) */
-.et-depth-panel{background:#111821;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px;color:#e9ecef;min-height:160px}
+.et-depth-panel{background:#111821;border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:12px;color:#e9ecef;min-height:160px;word-wrap:break-word;overflow:hidden}
 .et-depth-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;}
 .et-depth-panel.small{padding:10px;}
 .et-depth-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
@@ -120,3 +120,17 @@
 .et-depth-ladder td,.et-depth-ladder th{padding:4px 6px}
 .et-bid{color:#5ad37d}
 .et-ask{color:#ff6b6b}
+
+/* Slider layout for Market Depth */
+.et-depth-slider{display:flex;align-items:stretch;gap:8px}
+.et-depth-viewport{flex:1;overflow:hidden}
+.et-depth-track{display:flex;gap:12px;align-items:stretch}
+.et-depth-track .et-depth-panel{flex:0 0 calc(50% - 6px);max-width:calc(50% - 6px)}
+.et-nav{align-self:center;min-width:40px;height:40px;border-radius:50%;background:#1f2937 !important;color:#f8f9fa !important;border-color:#0d1b2a !important;display:flex;align-items:center;justify-content:center}
+.et-nav i{font-size:1.15rem;line-height:1}
+.et-nav:hover{background:#223046 !important;border-color:#1a2740 !important;color:#ffffff !important}
+.et-nav:disabled{opacity:.55;background:#3a4152 !important;border-color:#3a4152 !important;color:#d0d6dd !important}
+
+@media (max-width: 992px){
+  .et-depth-track .et-depth-panel{flex:0 0 100%;max-width:100%}
+}

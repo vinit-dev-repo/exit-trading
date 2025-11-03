@@ -7,7 +7,10 @@ const state = {
     sessionHandle: null,
     holdingsFilter: 'ALL',
     sessionActive: false,
-    selectedSymbol: null
+    selectedSymbol: null,
+    depthPage: 0,
+    depthPageSize: 2,
+    depthCards: []
 };
 
 const STATUS = {
@@ -102,18 +105,32 @@ async function refreshSchedules() {
 
 async function refreshDepth() {
     if (!state.currentUser) return;
+    let depths;
+    // Fetch first; show unavailable only on fetch failure
     try {
-        const depths = await fetchJson(`/api/depth/${state.currentUser}`);
-        renderDepth(depths);
-        renderDepthPanels(depths);
+        const uname = encodeURIComponent(state.currentUser || '');
+        depths = await fetchJson(`/api/depth/${uname}`);
     } catch (err) {
-        console.warn('Depth refresh failed', err);
+        console.warn('Depth fetch failed', err);
         const table = document.getElementById('depth-table');
         if (table) {
-            table.innerHTML = '<tr><td colspan="6" class="text-muted">Market depth unavailable. Click Refresh to retry.</td></tr>';
+            table.innerHTML = '<tr><td colspan="6" class="text-muted">Market depth unavailable. Click Retry to try again.</td></tr>';
         }
         const panels = document.getElementById('depth-panels');
-        if (panels) panels.innerHTML = '<div class="et-depth-muted">Market depth unavailable. Click Refresh to retry.</div>';
+        if (panels) panels.innerHTML = '<div class="et-depth-muted">Market depth unavailable. Click Retry to try again.</div>';
+        const retryBtn = document.getElementById('retry-depth');
+        if (retryBtn) retryBtn.disabled = false;
+        return;
+    }
+    // Render; keep render errors non-fatal
+    try {
+        renderDepth(depths);
+    } catch (err) {
+        console.warn('Depth render failed', err);
+        const panels = document.getElementById('depth-panels');
+        if (panels && !panels.innerHTML) {
+            panels.innerHTML = '<div class="et-depth-muted">Unable to render depth. Click Retry.</div>';
+        }
     }
 }
 
@@ -281,8 +298,8 @@ function renderDepth(depths) {
             });
         }
     }
-    // New depth detail panel
-    renderDepthPanel(depths);
+    // Render multi-panels grid
+    renderDepthPanels(depths);
 }
 
 function normalizeSymbol(sym){
@@ -308,11 +325,90 @@ function renderDepthPanels(depths){
     }
     const bySymbol = new Map();
     (depths||[]).forEach(d => bySymbol.set(normalizeSymbol(d.tradingsymbol), d));
+    const cards = [];
     filtered.forEach(h => {
         const sym = normalizeSymbol(h);
         const entry = bySymbol.get(sym);
-        container.appendChild(buildDepthCard(sym, entry));
+        const card = renderSafeDepthCard(sym, entry);
+        container.appendChild(card);
+        cards.push(card);
     });
+    // Save and apply paging (2 per page) — preserve current page across refreshes
+    const prevPage = state.depthPage || 0;
+    state.depthCards = cards;
+    applyDepthPage(prevPage);
+}
+
+// Safe depth card renderer with robust fallbacks for missing fields
+function renderSafeDepthCard(symbol, entry){
+    const card = document.createElement('div');
+    card.className = 'et-depth-panel small';
+    const buy = entry?.buyQuantity || 0;
+    const sell = entry?.sellQuantity || 0;
+    const pressure = formatPressure(buy, sell);
+    const ltp = entry?.ltp ?? '-';
+    const ts = entry?.capturedAt ?? '-';
+    const buys = Array.isArray(entry?.buyLevels) ? entry.buyLevels : [];
+    const sells = Array.isArray(entry?.sellLevels) ? entry.sellLevels : [];
+    const rows = Math.max(buys.length, sells.length, 5);
+    let ladder = '';
+    for (let i=0;i<rows;i++){
+        const b = buys[i] || {}; const s = sells[i] || {};
+        ladder += `<tr>
+            <td class="et-bid">${b.price ?? ''}</td>
+            <td class="et-bid">${b.orders ?? ''}</td>
+            <td class="et-bid">${b.quantity ?? ''}</td>
+            <td class="et-ask">${s.price ?? ''}</td>
+            <td class="et-ask">${s.orders ?? ''}</td>
+            <td class="et-ask">${s.quantity ?? ''}</td>
+        </tr>`;
+    }
+    const dash = '&mdash;';
+    card.innerHTML = `
+        <div class="et-depth-header">
+            <div class="et-depth-symbol">${symbol}</div>
+            <div class="et-depth-price">${ltp}</div>
+        </div>
+        <table class="et-depth-ladder">
+            <thead>
+                <tr><th colspan="3">Bid</th><th colspan="3">Offer</th></tr>
+                <tr><th>Price</th><th>Orders</th><th>Qty</th><th>Price</th><th>Orders</th><th>Qty</th></tr>
+            </thead>
+            <tbody>${ladder}</tbody>
+        </table>
+        <div class="et-depth-meta">
+            <div class="meta"><span class="et-depth-muted">Open:</span> ${entry?.open ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Prev. Close:</span> ${entry?.prevClose ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Low:</span> ${entry?.low ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">High:</span> ${entry?.high ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Volume:</span> ${entry?.volume ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Avg. price:</span> ${entry?.avgPrice ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Lower circuit:</span> ${entry?.lowerCircuit ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Upper circuit:</span> ${entry?.upperCircuit ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">LTQ:</span> ${entry?.ltq ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">LTT:</span> ${entry?.ltt ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">Pressure:</span> ${pressure}</div>
+            <div class="meta"><span class="et-depth-muted">Updated:</span> ${ts}</div>
+        </div>`;
+    return card;
+}
+
+function applyDepthPage(newPage){
+    const cards = state.depthCards || [];
+    const size = state.depthPageSize || 2;
+    if (typeof newPage === 'number') state.depthPage = newPage;
+    const totalPages = Math.max(1, Math.ceil(cards.length / size));
+    if (state.depthPage < 0) state.depthPage = 0;
+    if (state.depthPage > totalPages - 1) state.depthPage = totalPages - 1;
+    const start = state.depthPage * size;
+    const end = start + size;
+    cards.forEach((el, idx) => {
+        el.style.display = (idx >= start && idx < end) ? '' : 'none';
+    });
+    const prev = document.getElementById('depth-prev');
+    const next = document.getElementById('depth-next');
+    if (prev) prev.disabled = state.depthPage === 0;
+    if (next) next.disabled = state.depthPage >= totalPages - 1;
 }
 
 function buildDepthCard(symbol, entry){
@@ -632,6 +728,28 @@ function setupFormHandlers() {
             renderHoldings(user?.holdings || []);
         });
     }
+    // Retry buttons in card headers
+    const doRetry = async () => {
+        try {
+            const btns = document.querySelectorAll('#retry-depth,#retry-upcoming,#retry-executed,#retry-holdings');
+            btns.forEach(b => b && (b.disabled = true));
+            await refreshSchedules();
+            await refreshDepth();
+            await fetchSessionStatus();
+        } finally {
+            const btns = document.querySelectorAll('#retry-depth,#retry-upcoming,#retry-executed,#retry-holdings');
+            btns.forEach(b => b && (b.disabled = false));
+        }
+    };
+    ['retry-depth','retry-upcoming','retry-executed','retry-holdings'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', doRetry);
+    });
+    // Depth slider navigation
+    const prev = document.getElementById('depth-prev');
+    const next = document.getElementById('depth-next');
+    if (prev) prev.addEventListener('click', () => applyDepthPage(state.depthPage - 1));
+    if (next) next.addEventListener('click', () => applyDepthPage(state.depthPage + 1));
 }
 
 async function init() {
