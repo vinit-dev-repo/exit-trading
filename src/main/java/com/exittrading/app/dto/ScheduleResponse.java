@@ -24,6 +24,9 @@ public class ScheduleResponse {
     private BigDecimal limitPrice;
     private boolean autoRepeat;
     private boolean cancelOpenOrdersBeforeExecution;
+    // Hints for UI
+    private boolean rolledToNextSlot;
+    private String rolledTimeIst;
 
     public Long getId() {
         return id;
@@ -152,4 +155,9 @@ public class ScheduleResponse {
     public void setCancelOpenOrdersBeforeExecution(boolean cancelOpenOrdersBeforeExecution) {
         this.cancelOpenOrdersBeforeExecution = cancelOpenOrdersBeforeExecution;
     }
+
+    public boolean isRolledToNextSlot() { return rolledToNextSlot; }
+    public void setRolledToNextSlot(boolean rolledToNextSlot) { this.rolledToNextSlot = rolledToNextSlot; }
+    public String getRolledTimeIst() { return rolledTimeIst; }
+    public void setRolledTimeIst(String rolledTimeIst) { this.rolledTimeIst = rolledTimeIst; }
 }

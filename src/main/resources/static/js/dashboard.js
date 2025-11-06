@@ -10,7 +10,8 @@ const state = {
     selectedSymbol: null,
     depthPage: 0,
     depthPageSize: 2,
-    depthCards: []
+    depthCards: [],
+    analysisBySymbol: new Map()
 };
 
 const STATUS = {
@@ -84,6 +85,7 @@ async function bootstrapUserSettings() {
     }
     document.getElementById('logging-toggle').checked = !!user.loggingEnabled;
     document.getElementById('tradeDate').value = new Date().toISOString().split('T')[0];
+    await refreshAuctionSummary();
     renderHoldings(user.holdings || []);
     await refreshSchedules();
     await refreshDepth();
@@ -256,24 +258,64 @@ function renderHoldings(holdings) {
             qty != null ? `Qty: ${qty}` : null,
             avg != null ? `Avg: ${avg.toFixed(2)}` : null,
             last != null ? `LTP: ${last.toFixed(2)}` : null,
-            pnl != null ? `PnL: ${pnl.toFixed(2)}` : null,
+            pnl != null ? `P&L: ${pnl.toFixed(2)}` : null,
             pct != null ? `Day%: ${pct.toFixed(2)}` : null,
             product ? `Product: ${product}` : null,
             token ? `Token: ${token}` : null
         ].filter(Boolean).join(' | ');
         chip.innerHTML = `
-            <div class="chip-line"><strong>${symbol}</strong>${exchange ? ` <span class="text-muted">(${exchange})</span>` : ''}</div>
+            <div class="chip-line"><strong>${symbol}</strong>${exchange ? ` <span class="text-muted">(${exchange})</span>` : ''} </strong>${product ? ` <span class="text-muted">${product}</span>` : ''} </div>
             <div class="chip-meta text-muted">${
                 [
-                    qty != null ? `Qty ${qty}` : null,
-                    avg != null ? `Avg ${avg.toFixed(2)}` : null,
-                    last != null ? `LTP ${last.toFixed(2)}` : null,
-                    pct != null ? `${pct.toFixed(2)}%` : null
+                    qty != null ? `Qty: ${qty}` : null,
+                    avg != null ? `Avg: ${avg.toFixed(2)}` : null,
+                    last != null ? `LTP: ${last.toFixed(2)}` : null,
+                    pct != null ? `Day(%): ${pct.toFixed(2)}` : null,
+                    pnl != null ? `P&L: ${Number(pnl).toFixed(2)}` : null,
                 ].filter(Boolean).join(' · ')
             }</div>`;
+        // Append final flag values (analysis) inside holding chip
+        try {
+            const summary = state.analysisBySymbol.get(symbol);
+            if (summary) {
+                const flags = document.createElement('div');
+                flags.className = 'chip-flags';
+                const parts = [];
+                if (typeof summary.obi === 'number') {
+                    const obiPct = Math.round(summary.obi * 100);
+                    parts.push(`<span class="chip-flag">OBI ${obiPct > 0 ? '+' : ''}${obiPct}%</span>`);
+                }
+                if (summary.swing != null) {
+                    parts.push(`<span class="chip-flag">Swing ${Number(summary.swing).toFixed(2)}</span>`);
+                }
+                if (summary.sellSpikeScore != null) {
+                    parts.push(`<span class="chip-flag">Score ${Number(summary.sellSpikeScore).toFixed(2)}</span>`);
+                }
+                if (summary.confirmed != null) {
+                    parts.push(`<span class="chip-flag ${summary.confirmed ? 'flag-yes' : 'flag-no'}">Dump ${summary.confirmed ? 'YES' : 'NO'}</span>`);
+                }
+                flags.innerHTML = parts.join(' ');
+                chip.appendChild(flags);
+            }
+        } catch (_) { /* non-fatal */ }
         chip.addEventListener('click', () => presetSchedule({ symbol, token, qty }));
         container.appendChild(chip);
     });
+}
+
+async function refreshAuctionSummary(){
+    if(!state.currentUser) return;
+    try{
+        const uname = encodeURIComponent(state.currentUser || '');
+        const list = await fetchJson(`/api/auction/summary/${uname}`);
+        const map = new Map();
+        (list||[]).forEach(d => {
+            if(d && d.tradingsymbol){ map.set(normalizeSymbol(d.tradingsymbol), d); }
+        });
+        state.analysisBySymbol = map;
+    }catch(err){
+        state.analysisBySymbol = new Map();
+    }
 }
 
 function renderDepth(depths) {
@@ -609,15 +651,21 @@ function setupFormHandlers() {
             scheduledTime: (manualEnabled && manualTime) ? manualTime + ':00' : null
         };
         try {
-            await fetchJson(`/api/schedules/${state.currentUser}`, {
+            const resp = await fetchJson(`/api/schedules/${state.currentUser}`, {
                 method: 'POST',
                 body: JSON.stringify(payload)
             });
             form.reset();
             document.getElementById('tradeDate').value = new Date().toISOString().split('T')[0];
+            if (resp && resp.rolledToNextSlot) {
+                const time = resp.rolledTimeIst || (resp.nextExecutionTime ? new Date(resp.nextExecutionTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : 'next slot');
+                showToast(`Scheduled for next available slot at ${time}`);
+            } else {
+                showToast('Schedule created');
+            }
             refreshSchedules();
         } catch (err) {
-            alert(err.message || 'Failed to schedule');
+            showScheduleErrorModal(err?.message || 'Scheduled time is in the past. Please enable Manual Time and choose a future time.');
         }
     });
 
@@ -752,6 +800,36 @@ function setupFormHandlers() {
     if (next) next.addEventListener('click', () => applyDepthPage(state.depthPage + 1));
 }
 
+function showScheduleErrorModal(message){
+    try{
+        const text = document.getElementById('schedule-error-text');
+        if (text) text.textContent = message;
+        const modalEl = document.getElementById('schedule-error-modal');
+        if (!modalEl || !window.bootstrap || !bootstrap.Modal) { alert(message); return; }
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+        const btn = document.getElementById('schedule-error-manual-btn');
+        if (btn){
+            btn.onclick = () => {
+                try {
+                    const toggle = document.getElementById('manual-mode-toggle');
+                    const input = document.getElementById('manualTime');
+                    if (toggle && input){
+                        toggle.checked = true;
+                        input.disabled = false;
+                        if (!input.value){
+                            const now = new Date();
+                            now.setMinutes(now.getMinutes() + 2);
+                            input.value = now.toTimeString().slice(0,5);
+                        }
+                        input.focus();
+                    }
+                } catch(_){}
+            };
+        }
+    }catch(_){ alert(message); }
+}
+
 async function init() {
     await loadUsers();
     setupFormHandlers();
@@ -786,3 +864,21 @@ window.addEventListener('DOMContentLoaded', init);
 
 
 
+
+
+function showToast(message){
+    try{
+        const container = document.getElementById('toast-container');
+        if (!container || !window.bootstrap) { console.log(message); return; }
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center text-bg-dark border-0';
+        el.setAttribute('role', 'alert');
+        el.setAttribute('aria-live', 'assertive');
+        el.setAttribute('aria-atomic', 'true');
+        el.innerHTML = `<div class="d-flex"><div class="toast-body">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button></div>`;
+        container.appendChild(el);
+        const t = new bootstrap.Toast(el, { delay: 3000 });
+        t.show();
+        el.addEventListener('hidden.bs.toast', () => el.remove());
+    } catch(_) { console.log(message); }
+}

@@ -200,6 +200,28 @@
     </div>
 </div>
 
+<!-- Toast container -->
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toast-container" style="z-index: 1080;"></div>
+
+<!-- Schedule Error Modal -->
+<div class="modal fade" id="schedule-error-modal" tabindex="-1" aria-labelledby="scheduleErrorLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark text-light">
+      <div class="modal-header">
+        <h5 class="modal-title" id="scheduleErrorLabel">Cannot Schedule</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p id="schedule-error-text">Scheduled time is in the past. Please enable Manual Time and choose a future time.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-warning" id="schedule-error-manual-btn">Use Manual Time</button>
+      </div>
+    </div>
+  </div>
+  
+</div>
 <!-- Settings FAB and Offcanvas (outside main content) -->
 <button class="btn btn-secondary settings-fab" type="button" data-bs-toggle="offcanvas" data-bs-target="#settingsPanel" aria-controls="settingsPanel" title="Settings">
     <i class="bi bi-gear"></i>
@@ -236,7 +258,7 @@
   <hr class="border-light" />
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="/js/dashboard.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/dashboard.js"></script>
 </body>
 </html>

@@ -56,10 +56,14 @@
 .schedule-symbol { font-weight:600; letter-spacing:.2px; margin-bottom:.25rem; }
 
 /* Professional holding chip styling */
-.holding-chip { background:#f8f9fa; color:#212529; border:1px solid rgba(0,0,0,.125); border-radius: 8px; padding:8px 12px; margin:4px; cursor:pointer; min-width:140px; }
+.holding-chip { background:#f8f9fa; color:#212529; border:1px solid rgba(0,0,0,.125); border-radius: 5px; padding:8px 12px; margin:4px; cursor:pointer; min-width:140px; }
 .holding-chip:hover { background:#e9ecef; }
 .holding-chip .chip-line { line-height: 1; }
 .holding-chip .chip-meta { font-size: .85rem; }
+.holding-chip .chip-flags { margin-top: 4px; display:flex; flex-wrap:wrap; gap:4px; }
+.holding-chip .chip-flag { font-size:.72rem; background:#e9ecef; color:#212529; border:1px solid rgba(0,0,0,.15); border-radius:5px; padding:2px 6px; }
+.holding-chip .chip-flag.flag-yes{ background:#d1e7dd; color:#0f5132; border-color:#0f5132; }
+.holding-chip .chip-flag.flag-no{ background:#f8d7da; color:#842029; border-color:#842029; }
 
 
 /* Sidebar visual polish */

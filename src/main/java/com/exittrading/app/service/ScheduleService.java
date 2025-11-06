@@ -7,6 +7,7 @@ import com.exittrading.app.domain.UserAccount;
 import com.exittrading.app.dto.ScheduleRequest;
 import com.exittrading.app.dto.ScheduleResponse;
 import com.exittrading.app.repository.TradingScheduleRepository;
+import com.exittrading.app.config.SessionSlotConfig;
 import com.exittrading.app.repository.UserAccountRepository;
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.transaction.Transactional;
@@ -33,11 +34,13 @@ public class ScheduleService {
     private final TradingScheduleRepository scheduleRepository;
     private final UserAccountRepository userRepository;
     private final IstClock clock;
+    private final SessionSlotConfig slotConfig;
 
-    public ScheduleService(TradingScheduleRepository scheduleRepository, UserAccountRepository userRepository, IstClock clock) {
+    public ScheduleService(TradingScheduleRepository scheduleRepository, UserAccountRepository userRepository, IstClock clock, SessionSlotConfig slotConfig) {
         this.scheduleRepository = scheduleRepository;
         this.userRepository = userRepository;
         this.clock = clock;
+        this.slotConfig = slotConfig;
     }
 
     public List<ScheduleResponse> fetchScheduled(String username, List<ScheduleStatus> statuses) {
@@ -75,7 +78,10 @@ public class ScheduleService {
         schedule.setAutoRepeat(request.isAutoRepeat());
         schedule.setCancelOpenOrdersBeforeExecution(request.isCancelOpenOrdersBeforeExecution());
         schedule.setStatus(ScheduleStatus.SCHEDULED);
-        schedule.setNextExecutionTime(calculateNextExecutionTime(request.getTradeDate(), request.getSessionSlot(), request.getScheduledTime()));
+        var computed = computeNextAndAlign(request.getTradeDate(), request.getSessionSlot(), request.getScheduledTime());
+        schedule.setNextExecutionTime(computed.time);
+        if (computed.slot != null) schedule.setSessionSlot(computed.slot);
+        schedule.setTradeDate(computed.time.toLocalDate());
         TradingSchedule saved = scheduleRepository.save(schedule);
         log.info("Scheduled req user={} symbol={} token={} side={} qty={} date={} slot={} manualTime={} next={} limit={} autoRepeat={} cancelBefore={}",
                 username,
@@ -90,7 +96,7 @@ public class ScheduleService {
                 schedule.getLimitPrice(),
                 schedule.isAutoRepeat(),
                 schedule.isCancelOpenOrdersBeforeExecution());
-        return toResponse(saved);
+        return toResponse(saved, computed.rolled);
     }
 
     @Transactional
@@ -106,7 +112,10 @@ public class ScheduleService {
         schedule.setLimitPrice(request.getLimitPrice());
         schedule.setAutoRepeat(request.isAutoRepeat());
         schedule.setCancelOpenOrdersBeforeExecution(request.isCancelOpenOrdersBeforeExecution());
-        schedule.setNextExecutionTime(calculateNextExecutionTime(request.getTradeDate(), request.getSessionSlot(), request.getScheduledTime()));
+        var computed = computeNextAndAlign(request.getTradeDate(), request.getSessionSlot(), request.getScheduledTime());
+        schedule.setNextExecutionTime(computed.time);
+        if (computed.slot != null) schedule.setSessionSlot(computed.slot);
+        schedule.setTradeDate(computed.time.toLocalDate());
         TradingSchedule saved = scheduleRepository.save(schedule);
         log.info("Rescheduled id={} symbol={} side={} qty={} date={} slot={} manualTime={} next={} limit={} autoRepeat={} cancelBefore={}",
                 scheduleId,
@@ -120,7 +129,7 @@ public class ScheduleService {
                 saved.getLimitPrice(),
                 saved.isAutoRepeat(),
                 saved.isCancelOpenOrdersBeforeExecution());
-        return toResponse(saved);
+        return toResponse(saved, computed.rolled);
     }
 
     @Transactional
@@ -168,12 +177,75 @@ public class ScheduleService {
     }
 
     public ZonedDateTime calculateNextExecutionTime(LocalDate date, SessionSlot session, java.time.LocalTime override) {
-        java.time.LocalTime time = override != null ? override : session.getTime();
+        java.time.LocalTime time = (override != null) ? override : session.getTime();
+        ZonedDateTime now = clock.now();
         ZonedDateTime scheduled = ZonedDateTime.of(date, time, clock.zoneId());
-        if (scheduled.isBefore(clock.now())) {
-            throw new IllegalArgumentException("Scheduled time is in the past");
+
+        if (scheduled.isAfter(now)) {
+            return scheduled;
         }
-        return scheduled;
+
+        // Auto-pick next slot from config if present; else use enum.
+        LocalDate anchorDate = now.toLocalDate();
+        java.time.LocalTime nowTime = now.toLocalTime();
+        java.util.List<java.time.LocalTime> configured = (slotConfig != null) ? slotConfig.orderedTimes() : java.util.List.of();
+        if (configured != null && !configured.isEmpty()) {
+            for (java.time.LocalTime t : configured) {
+                if (t.isAfter(nowTime)) return ZonedDateTime.of(anchorDate, t, clock.zoneId());
+            }
+            return ZonedDateTime.of(anchorDate.plusDays(1), configured.get(0), clock.zoneId());
+        } else {
+            for (SessionSlot s : SessionSlot.ordered()) {
+                if (s.getTime().isAfter(nowTime)) return ZonedDateTime.of(anchorDate, s.getTime(), clock.zoneId());
+            }
+            SessionSlot first = SessionSlot.ordered().get(0);
+            return ZonedDateTime.of(anchorDate.plusDays(1), first.getTime(), clock.zoneId());
+        }
+    }
+
+    private static class ComputedNext {
+        final ZonedDateTime time; final SessionSlot slot; final boolean rolled;
+        ComputedNext(ZonedDateTime time, SessionSlot slot, boolean rolled){ this.time=time; this.slot=slot; this.rolled=rolled; }
+    }
+
+    private ComputedNext computeNextAndAlign(LocalDate date, SessionSlot session, java.time.LocalTime override){
+        java.time.LocalTime desired = (override != null) ? override : session.getTime();
+        ZonedDateTime now = clock.now();
+        ZonedDateTime requested = ZonedDateTime.of(date, desired, clock.zoneId());
+
+        java.util.List<java.time.LocalTime> configured = (slotConfig != null) ? slotConfig.orderedTimes() : java.util.List.of();
+        boolean hasConfig = configured != null && !configured.isEmpty();
+
+        if (requested.isAfter(now)) {
+            return new ComputedNext(requested, resolveEnumSlot(desired), false);
+        }
+
+        java.time.LocalDate anchor = now.toLocalDate();
+        java.time.LocalTime nowTime = now.toLocalTime();
+        if (hasConfig) {
+            for (java.time.LocalTime t : configured) {
+                if (t.isAfter(nowTime)) {
+                    return new ComputedNext(ZonedDateTime.of(anchor, t, clock.zoneId()), resolveEnumSlot(t), true);
+                }
+            }
+            java.time.LocalTime first = configured.get(0);
+            return new ComputedNext(ZonedDateTime.of(anchor.plusDays(1), first, clock.zoneId()), resolveEnumSlot(first), true);
+        } else {
+            for (SessionSlot s : SessionSlot.ordered()) {
+                if (s.getTime().isAfter(nowTime)) {
+                    return new ComputedNext(ZonedDateTime.of(anchor, s.getTime(), clock.zoneId()), s, true);
+                }
+            }
+            SessionSlot first = SessionSlot.ordered().get(0);
+            return new ComputedNext(ZonedDateTime.of(anchor.plusDays(1), first.getTime(), clock.zoneId()), first, true);
+        }
+    }
+
+    private SessionSlot resolveEnumSlot(java.time.LocalTime t){
+        for (SessionSlot s : SessionSlot.ordered()){
+            if (s.getTime().equals(t)) return s;
+        }
+        return null;
     }
 
     public TradingSchedule loadEntity(Long scheduleId) {
@@ -181,7 +253,9 @@ public class ScheduleService {
                 .orElseThrow(() -> new EntityNotFoundException("Schedule not found"));
     }
 
-    public ScheduleResponse toResponse(TradingSchedule schedule) {
+    public ScheduleResponse toResponse(TradingSchedule schedule) { return toResponse(schedule, false); }
+
+    public ScheduleResponse toResponse(TradingSchedule schedule, boolean rolled) {
         ScheduleResponse response = new ScheduleResponse();
         response.setId(schedule.getId());
         response.setUsername(schedule.getUser().getUsername());
@@ -200,6 +274,10 @@ public class ScheduleService {
         response.setLimitPrice(schedule.getLimitPrice());
         response.setAutoRepeat(schedule.isAutoRepeat());
         response.setCancelOpenOrdersBeforeExecution(schedule.isCancelOpenOrdersBeforeExecution());
+        response.setRolledToNextSlot(rolled);
+        if (schedule.getNextExecutionTime() != null) {
+            response.setRolledTimeIst(schedule.getNextExecutionTime().toLocalTime().format(TIME_FMT));
+        }
         return response;
     }
 }

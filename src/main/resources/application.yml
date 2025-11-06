@@ -28,6 +28,7 @@ logging:
   level:
     root: INFO
     com.exittrading: DEBUG
+    ticker: INFO
   file:
     name: logs/exittrading.log
 
@@ -42,3 +43,24 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
+auction:
+  detector:
+    levels: 3
+    windowSec: 90
+    ewmaHalfLifeSec: 20
+    scoreTrigger: 2.2
+    swingConfirm: 0.30
+    nearLtpBps: 15
+    actionWindowStartSec: 300
+    safetySec: 45
+
+# Configurable PCA session slots (HH:mm). If omitted, fallback to built-in enum.
+pca:
+  slots:
+    - "09:30"
+    - "10:30"
+    - "11:30"
+    - "12:30"
+    - "13:30"
+    - "14:30"

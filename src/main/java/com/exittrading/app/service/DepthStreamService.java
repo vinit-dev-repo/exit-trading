@@ -19,6 +19,7 @@ import java.util.stream.Collectors;
 public class DepthStreamService {
 
     private static final Logger log = LoggerFactory.getLogger(DepthStreamService.class);
+    private static final Logger tlog = LoggerFactory.getLogger("ticker");
 
     private final KiteSessionManager sessionManager;
 
@@ -204,10 +205,35 @@ public class DepthStreamService {
                 if (ltt != null) v.setLtt(String.valueOf(ltt));
                 v.setCapturedAt(ZonedDateTime.now());
                 cacheByToken.put(tokenStr, v);
+
+                // Log a concise, readable per-holding line to ticker log
+                if (sym != null) {
+                    String bestBid = formatLevelSafe(v.getBuyLevels());
+                    String bestAsk = formatLevelSafe(v.getSellLevels());
+                    String ltpStr = v.getLtp() != null ? v.getLtp().toPlainString() : "-";
+                    String ts = v.getCapturedAt() != null ? v.getCapturedAt().toLocalTime().toString() : "-";
+                    tlog.info("{} | ts={} | ltp={} | buyQty={} | sellQty={} | bid1={} | ask1={}",
+                            sym,
+                            ts,
+                            ltpStr,
+                            v.getBuyQuantity(),
+                            v.getSellQuantity(),
+                            bestBid,
+                            bestAsk);
+                }
             }
         } catch (Exception e) {
             log.warn("Depth stream tick parse failed: {}", e.getMessage());
         }
+    }
+
+    private String formatLevelSafe(java.util.List<DepthView.Level> levels){
+        if (levels == null || levels.isEmpty()) return "-";
+        DepthView.Level l = levels.get(0);
+        String p = String.valueOf(l.getPrice());
+        String q = String.valueOf(l.getQuantity());
+        String o = String.valueOf(l.getOrders());
+        return p + "×" + q + "(" + o + ")";
     }
 
     private long sumDepthQty(List<?> levels) {

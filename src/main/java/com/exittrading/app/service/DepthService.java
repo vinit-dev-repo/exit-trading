@@ -6,6 +6,8 @@ import com.exittrading.app.domain.UserAccount;
 import com.exittrading.app.dto.DepthView;
 import com.exittrading.app.repository.DepthSnapshotRepository;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,6 +15,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class DepthService {
+
+    private static final Logger tlog = LoggerFactory.getLogger("ticker");
 
     private final DepthSnapshotRepository repository;
     private final KiteGateway gateway;
@@ -56,6 +60,8 @@ public class DepthService {
         snapshot.setLtp(view.getLtp());
         snapshot.setCapturedAt(view.getCapturedAt());
         repository.save(snapshot);
+        // Log readable ticker line for persisted snapshot as well
+        logTicker(view);
     }
 
     public List<DepthView> latest(UserAccount user) {
@@ -80,30 +86,61 @@ public class DepthService {
     public List<DepthView> latestOrLive(UserAccount user) {
         List<DepthView> persisted = latest(user);
         if (!persisted.isEmpty()) {
+            // Also mirror to ticker log for visibility
+            persisted.forEach(this::logTicker);
             return persisted;
         }
-        // Fallback: fetch up to 5 live depths from holdings
-        java.util.List<DepthView> result = user.getHoldings().stream()
+        // Fallback: fetch up to 5 live depths from holdings (resilient to per-symbol failures)
+        java.util.List<DepthView> result = new java.util.ArrayList<>();
+        user.getHoldings().stream()
                 .filter(sym -> sym != null && !sym.isBlank())
                 .limit(5)
-                .map(sym -> {
-                    String main = sym;
-                    int pipe = main.indexOf('|');
-                    if (pipe > -1) {
-                        main = main.substring(0, pipe);
+                .forEach(sym -> {
+                    try {
+                        String main = sym;
+                        int pipe = main.indexOf('|');
+                        if (pipe > -1) {
+                            main = main.substring(0, pipe);
+                        }
+                        // Extract token if present as 8th segment
+                        String token = null;
+                        String[] parts = sym.split("\\|");
+                        if (parts.length >= 8) {
+                            token = parts[7] != null && !parts[7].isBlank() ? parts[7].trim() : null;
+                        }
+                        String instrument = main; // keep exchange prefix if present
+                        DepthView v = gateway.fetchDepth(instrument, token).join();
+                        if (v != null) {
+                            result.add(v);
+                            logTicker(v);
+                        }
+                    } catch (Exception ex) {
+                        // Skip this symbol; keep others flowing to UI
                     }
-                    // Extract token if present as 8th segment
-                    String token = null;
-                    String[] parts = sym.split("\\|");
-                    if (parts.length >= 8) {
-                        token = parts[7] != null && !parts[7].isBlank() ? parts[7].trim() : null;
-                    }
-                    // Preserve exchange prefix if present, e.g., NSE:INFY
-                    String instrument = main;
-                    return gateway.fetchDepth(instrument, token);
-                })
-                .map(java.util.concurrent.CompletableFuture::join)
-                .collect(Collectors.toList());
+                });
+        if (result.isEmpty()) {
+            try { tlog.info("{} | ts=- | ltp=- | buyQty=0 | sellQty=0 | bid1=- | ask1=-", user.getUsername()); } catch (Exception ignored) {}
+        }
         return result;
+    }
+
+    private void logTicker(DepthView v) {
+        try {
+            if (v == null) return;
+            String sym = v.getTradingsymbol();
+            if (sym == null) sym = "-";
+            String ts = v.getCapturedAt() != null ? v.getCapturedAt().toLocalTime().toString() : "-";
+            String ltp = v.getLtp() != null ? v.getLtp().toPlainString() : "-";
+            String bid1 = levelStrSafe(v.getBuyLevels());
+            String ask1 = levelStrSafe(v.getSellLevels());
+            tlog.info("{} | ts={} | ltp={} | buyQty={} | sellQty={} | bid1={} | ask1={}",
+                    sym, ts, ltp, v.getBuyQuantity(), v.getSellQuantity(), bid1, ask1);
+        } catch (Exception ignored) {}
+    }
+
+    private String levelStrSafe(java.util.List<DepthView.Level> lvls) {
+        if (lvls == null || lvls.isEmpty()) return "-";
+        DepthView.Level l = lvls.get(0);
+        return String.valueOf(l.getPrice()) + "×" + l.getQuantity() + "(" + l.getOrders() + ")";
     }
 }

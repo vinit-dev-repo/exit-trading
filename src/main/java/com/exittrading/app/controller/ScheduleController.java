@@ -45,17 +45,26 @@ public class ScheduleController {
     }
 
     @PostMapping("/{username}")
-    public ScheduleResponse create(@PathVariable String username, @RequestBody @Valid ScheduleRequest request) {
-        ScheduleResponse response = scheduleService.createSchedule(username, request);
-        executionEngine.scheduleExecutionTask(scheduleService.loadEntity(response.getId()));
-        return response;
+    public ResponseEntity<?> create(@PathVariable String username, @RequestBody @Valid ScheduleRequest request) {
+        try {
+            ScheduleResponse response = scheduleService.createSchedule(username, request);
+            executionEngine.scheduleExecutionTask(scheduleService.loadEntity(response.getId()));
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            // Return user-friendly 400 without breaking the app
+            return ResponseEntity.badRequest().body("Scheduled time is in the past. Please enable Manual Time and choose a future time.");
+        }
     }
 
     @PutMapping("/{scheduleId}")
-    public ScheduleResponse update(@PathVariable Long scheduleId, @RequestBody @Valid ScheduleRequest request) {
-        ScheduleResponse response = scheduleService.updateSchedule(scheduleId, request);
-        executionEngine.reschedule(scheduleService.loadEntity(scheduleId));
-        return response;
+    public ResponseEntity<?> update(@PathVariable Long scheduleId, @RequestBody @Valid ScheduleRequest request) {
+        try {
+            ScheduleResponse response = scheduleService.updateSchedule(scheduleId, request);
+            executionEngine.reschedule(scheduleService.loadEntity(scheduleId));
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.badRequest().body("Scheduled time is in the past. Please enable Manual Time and choose a future time.");
+        }
     }
 
     @DeleteMapping("/{scheduleId}")
