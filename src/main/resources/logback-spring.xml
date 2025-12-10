@@ -5,8 +5,10 @@
 
     <!-- Console -->
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="com.exittrading.app.logging.MarketHoursFilter" />
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+            <!-- Include stack traces when present -->
+            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n%ex</pattern>
         </encoder>
     </appender>
 
@@ -17,6 +19,7 @@
             <fileNamePattern>${LOG_DIR}/app-info-%d{yyyy-MM-dd}.log.gz</fileNamePattern>
             <maxHistory>7</maxHistory>
         </rollingPolicy>
+        <filter class="com.exittrading.app.logging.MarketHoursFilter" />
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>INFO</level>
         </filter>
@@ -26,7 +29,8 @@
             <onMismatch>NEUTRAL</onMismatch>
         </filter>
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+            <!-- Capture stack traces for WARN-level exceptions as well -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n%ex</pattern>
         </encoder>
     </appender>
 
@@ -43,7 +47,8 @@
             <onMismatch>DENY</onMismatch>
         </filter>
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+            <!-- Always include full stack traces for errors -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n%ex</pattern>
         </encoder>
     </appender>
 
@@ -54,14 +59,35 @@
             <fileNamePattern>${LOG_DIR}/ticker-%d{yyyy-MM-dd}.log.gz</fileNamePattern>
             <maxHistory>5</maxHistory>
         </rollingPolicy>
+        <filter class="com.exittrading.app.logging.MarketHoursFilter" />
         <encoder>
             <pattern>%d{HH:mm:ss} %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Liquidity impact API rolling file (daily, keep last 5 trading days) -->
+    <appender name="IMPACT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/impact.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- Roll daily; retain last 5 days -->
+            <fileNamePattern>${LOG_DIR}/impact-%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>5</maxHistory>
+        </rollingPolicy>
+        <!-- Allow only during Mon–Fri, 09:15–16:00 IST -->
+        <filter class="com.exittrading.app.logging.MarketHoursFilter" />
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
         </encoder>
     </appender>
 
     <!-- Route ticker logger to TICKER_FILE only -->
     <logger name="ticker" level="INFO" additivity="false">
         <appender-ref ref="TICKER_FILE"/>
+    </logger>
+
+    <!-- Route liquidity-impact logger to IMPACT_FILE only -->
+    <logger name="impact" level="INFO" additivity="false">
+        <appender-ref ref="IMPACT_FILE"/>
     </logger>
 
     <!-- Root: console + general + errors -->
@@ -72,4 +98,3 @@
     </root>
 
 </configuration>
-

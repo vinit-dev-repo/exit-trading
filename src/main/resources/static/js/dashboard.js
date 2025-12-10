@@ -1,15 +1,17 @@
-const state = {
+﻿const state = {
     users: [],
     currentUser: null,
     refreshHandle: null,
     scheduleHandle: null,
     depthHandle: null,
     sessionHandle: null,
+    newsHandle: null,
+    newsRetry: null,
     holdingsFilter: 'ALL',
     sessionActive: false,
     selectedSymbol: null,
     depthPage: 0,
-    depthPageSize: 2,
+    depthPageSize: 3,
     depthCards: [],
     analysisBySymbol: new Map()
 };
@@ -41,6 +43,68 @@ function formatPressure(buy, sell) {
     const buyPct = Math.round((buy / total) * 100);
     const sellPct = 100 - buyPct;
     return `Buy ${buyPct}% / Sell ${sellPct}%`;
+}
+
+// Indian digit-grouping formatter for readability (e.g., 1,23,456)
+function formatInr(x){
+    if (x === null || x === undefined) return '';
+    const n = Number(x);
+    if (!Number.isFinite(n)) return String(x);
+    return n.toLocaleString('en-IN');
+}
+
+async function fetchNews(){
+    try{
+        const container = document.getElementById('news-panel');
+        if (!container) return;
+        const resp = await fetch('/api/news');
+        if (!resp.ok) throw new Error(`News fetch failed ${resp.status}`);
+        const data = await resp.json();
+        const items = data?.data?.latest_news || [];
+        renderNews(items);
+    }catch(err){
+        const container = document.getElementById('news-panel');
+        if (container) container.innerHTML = '<div class="text-muted small">News unavailable (will retry)...</div>';
+        // Gentle retry to ride over transient 5xx
+        try { clearTimeout(state.newsRetry); } catch(_) {}
+        state.newsRetry = setTimeout(fetchNews, 15000);
+        console.warn('News fetch error (retrying)', err?.message || err);
+    }
+}
+
+function renderNews(items){
+    const container = document.getElementById('news-panel');
+    if (!container) return;
+    if (!items || items.length === 0){
+        container.innerHTML = '<div class="text-muted small">No news.</div>';
+        return;
+    }
+    // Duplicate list to make scrolling seamless and adjust duration based on length
+    const repeat = 2; // exactly 2 copies so -50% translate loops perfectly
+    const list = [];
+    for (let r = 0; r < repeat; r++){
+        list.push(...items);
+    }
+    const rows = list.map(n => {
+        const title = n?.news_object?.title || '-';
+        const text = n?.news_object?.text || '';
+        const sent = (n?.news_object?.overall_sentiment || '').toLowerCase();
+        const sentBadge = sent === 'positive' ? 'bg-success' : (sent === 'negative' ? 'bg-danger' : 'bg-secondary');
+        const ts = n?.publish_date ? formatIst(n.publish_date) : '-';
+        const sym = n?.display_symbol || n?.sm_symbol || '';
+        return `<div class="news-item">
+            <div class="d-flex justify-content-between">
+                <span class="fw-bold">${sym}</span>
+                <span class="badge ${sentBadge}">${sent || 'neutral'}</span>
+            </div>
+            <div class="news-title">${title}</div>
+            <div class="news-time text-muted small">${ts}</div>
+            <div class="news-text small">${text}</div>
+        </div>`;
+    }).join('');
+    // Faster cadence so it starts immediately and loops with minimal gap
+    const duration = Math.max(10, list.length * 1.5);
+    container.innerHTML = `<div class="news-scroll" style="--news-duration:${duration}s">${rows}</div>`;
 }
 
 async function loadUsers() {
@@ -89,7 +153,40 @@ async function bootstrapUserSettings() {
     renderHoldings(user.holdings || []);
     await refreshSchedules();
     await refreshDepth();
+    try { await updateHoldingsImpact(); } catch(_) {}
     await fetchSessionStatus();
+}
+
+// Format to DD-MON-YY HH:mm:ss IST regardless of browser timezone
+function formatIst(value){
+    if (value === null || value === undefined || value === '-') return '-';
+    let d;
+    try {
+        if (typeof value === 'number') {
+            d = new Date(value > 1e12 ? value : value * 1000);
+        } else if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+            const n = Number(value.trim());
+            d = new Date(n > 1e12 ? n : n * 1000);
+        } else {
+            d = new Date(value);
+        }
+        if (isNaN(d)) return '-';
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit', month: 'short', year: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        }).formatToParts(d);
+        let dd='01', mon='JAN', yy='00', hh='00', mm='00', ss='00';
+        for (const p of parts){
+            if (p.type === 'day') dd = p.value;
+            else if (p.type === 'month') mon = p.value.toUpperCase();
+            else if (p.type === 'year') yy = p.value;
+            else if (p.type === 'hour') hh = p.value;
+            else if (p.type === 'minute') mm = p.value;
+            else if (p.type === 'second') ss = p.value;
+        }
+        return `${dd}-${mon}-${yy} ${hh}:${mm}:${ss} IST`;
+    } catch { return '-'; }
 }
 
 async function refreshSchedules() {
@@ -134,6 +231,8 @@ async function refreshDepth() {
             panels.innerHTML = '<div class="et-depth-muted">Unable to render depth. Click Retry.</div>';
         }
     }
+    // After depth data is in state, compute holdings impact
+    try { await updateHoldingsImpact(); } catch(_) {}
 }
 
 function renderSchedules(schedules) {
@@ -253,16 +352,11 @@ function renderHoldings(holdings) {
         if (filter !== 'ALL' && exchange && exchange.toUpperCase() !== filter) return;
         const chip = document.createElement('div');
         chip.className = 'holding-chip';
+        chip.dataset.symbol = symbol;
+        if (qty != null) chip.dataset.qty = qty;
         chip.title = [
-            exchange ? `Exchange: ${exchange}` : null,
-            qty != null ? `Qty: ${qty}` : null,
-            avg != null ? `Avg: ${avg.toFixed(2)}` : null,
-            last != null ? `LTP: ${last.toFixed(2)}` : null,
-            pnl != null ? `P&L: ${pnl.toFixed(2)}` : null,
-            pct != null ? `Day%: ${pct.toFixed(2)}` : null,
-            product ? `Product: ${product}` : null,
             token ? `Token: ${token}` : null
-        ].filter(Boolean).join(' | ');
+                ].filter(Boolean).join(' ')
         chip.innerHTML = `
             <div class="chip-line"><strong>${symbol}</strong>${exchange ? ` <span class="text-muted">(${exchange})</span>` : ''} </strong>${product ? ` <span class="text-muted">${product}</span>` : ''} </div>
             <div class="chip-meta text-muted">${
@@ -272,34 +366,42 @@ function renderHoldings(holdings) {
                     last != null ? `LTP: ${last.toFixed(2)}` : null,
                     pct != null ? `Day(%): ${pct.toFixed(2)}` : null,
                     pnl != null ? `P&L: ${Number(pnl).toFixed(2)}` : null,
-                ].filter(Boolean).join(' · ')
+                ].filter(Boolean).join(' ')
             }</div>`;
-        // Append final flag values (analysis) inside holding chip
+        
+        // Restyle chip-meta as badge-like flags and split rows
         try {
-            const summary = state.analysisBySymbol.get(symbol);
-            if (summary) {
-                const flags = document.createElement('div');
-                flags.className = 'chip-flags';
-                const parts = [];
-                if (typeof summary.obi === 'number') {
-                    const obiPct = Math.round(summary.obi * 100);
-                    parts.push(`<span class="chip-flag">OBI ${obiPct > 0 ? '+' : ''}${obiPct}%</span>`);
-                }
-                if (summary.swing != null) {
-                    parts.push(`<span class="chip-flag">Swing ${Number(summary.swing).toFixed(2)}</span>`);
-                }
-                if (summary.sellSpikeScore != null) {
-                    parts.push(`<span class="chip-flag">Score ${Number(summary.sellSpikeScore).toFixed(2)}</span>`);
-                }
-                if (summary.confirmed != null) {
-                    parts.push(`<span class="chip-flag ${summary.confirmed ? 'flag-yes' : 'flag-no'}">Dump ${summary.confirmed ? 'YES' : 'NO'}</span>`);
-                }
-                flags.innerHTML = parts.join(' ');
-                chip.appendChild(flags);
+            const meta = chip.querySelector('.chip-meta');
+            const row1 = [
+                (qty != null ? `<span class=\"chip-flag\">Qty: ${qty}</span>` : null),
+                (avg != null ? `<span class=\"chip-flag\">Avg: ${avg.toFixed(2)}</span>` : null),
+                (last != null ? `<span class=\"chip-flag\">LTP: ${last.toFixed(2)}</span>` : null),
+            ].filter(Boolean).join(' ');
+            const row2 = [
+                (pct != null ? `<span class=\"chip-flag\">Day(%): ${pct.toFixed(2)}</span>` : null),
+                (pnl != null ? `<span class=\"chip-flag\">P&L: ${Number(pnl).toFixed(2)}</span>` : null),
+            ].filter(Boolean).join(' ');
+            if (meta) {
+                meta.classList.remove('text-muted');
+                meta.innerHTML = `${row1 ? `<div class=\"chip-meta-row\">${row1}</div>` : ''}${row2 ? `<div class=\"chip-meta-row\">${row2}</div>` : ''}`;
             }
-        } catch (_) { /* non-fatal */ }
+        } catch(_) {}
+        // Removed OBI/Swing/Score/Dump chips on holdings for cleaner UI
+        // Modern Liquidity Impact mini-widget inside holding card
+        try {
+            const impact = document.createElement('div');
+            impact.className = 'chip-impact';
+            impact.innerHTML = '<span class="impact-badge impact-low" data-role="sell">SELL --</span> <span class="impact-badge impact-low" data-role="buy">BUY --</span>';
+            chip.appendChild(impact);
+
+        } catch(_) {}
         chip.addEventListener('click', () => presetSchedule({ symbol, token, qty }));
         container.appendChild(chip);
+        try {
+            const hr = document.createElement('hr');
+            hr.className = 'border-dark';
+            container.appendChild(hr);
+        } catch (_) { /* ignore */ }
     });
 }
 
@@ -367,6 +469,7 @@ function renderDepthPanels(depths){
     }
     const bySymbol = new Map();
     (depths||[]).forEach(d => bySymbol.set(normalizeSymbol(d.tradingsymbol), d));
+    state.depthDataBySymbol = bySymbol;
     const cards = [];
     filtered.forEach(h => {
         const sym = normalizeSymbol(h);
@@ -375,21 +478,128 @@ function renderDepthPanels(depths){
         container.appendChild(card);
         cards.push(card);
     });
-    // Save and apply paging (2 per page) — preserve current page across refreshes
+    // Save and apply paging (2 per page) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â preserve current page across refreshes
     const prevPage = state.depthPage || 0;
     state.depthCards = cards;
     applyDepthPage(prevPage);
+    
+}
+
+async function updateHoldingsImpact(){
+    try{
+        const chips = Array.from(document.querySelectorAll('#holdings-list .holding-chip'));
+        if (!chips.length) return;
+        for (const chip of chips){
+            const sym = chip.dataset.symbol;
+            const entry = state.depthDataBySymbol?.get?.(normalizeSymbol(sym));
+            if (!entry) continue;
+            const exitQty = Number(chip.dataset.qty || 0);
+            const payload = { ...entry, exitQuantity: Number.isFinite(exitQty) ? exitQty : undefined };
+            const resp = await fetchJson('/api/liquidity-impact/compute', { method: 'POST', body: JSON.stringify([payload]) });
+            const r = Array.isArray(resp) ? resp[0] : null;
+            const container = chip.querySelector('.chip-impact');
+            if (!r || !container) continue;
+            const legend = (r.scores?.legend || 'Low').toLowerCase();
+            const legendCls = legend.includes('high') ? 'impact-high' : (legend.includes('moderate') ? 'impact-mod' : 'impact-low');
+            const sellScore = Math.round((r.scores?.sell ?? 0) * 10) / 10;
+            const buyScore = Math.round((r.scores?.buy ?? 0) * 10) / 10;
+            const fmt = (v) => (v == null || Number.isNaN(v)) ? '-' : (typeof v === 'number' ? (Math.round(v * 100) / 100).toFixed(2) : String(v));
+            const fmtBps = (v) => (v == null || Number.isNaN(v)) ? '-' : `${(Math.round(v * 10) / 10).toFixed(1)} bps/s`;
+            const fmtSec = (v) => (v == null || Number.isNaN(v)) ? '-' : `${Math.round(v)}s`;
+            const q = (dp) => (dp && typeof dp.shares === 'number') ? dp.shares : 0;
+            const p = (dp) => (dp && typeof dp.price === 'number') ? fmt(dp.price) : '-';
+            const fmtQty = (v) => (v == null || Number.isNaN(v)) ? '-' : formatInr(v);
+            const fmtOrder = (label, qty, orders, price) => {
+                if (qty == null || Number.isNaN(qty)) return `${label}: -`;
+                const parts = [`${label}: ${fmtQty(qty)}`];
+                if (orders != null && orders > 0) parts.push(`per ${formatInr(orders)}`);
+                if (price != null && Number.isFinite(price)) parts.push(`@${fmt(price)}`);
+                return parts.join(' ');
+            };
+            const bestBid = r.best?.bid, bestAsk = r.best?.ask, spr = r.best?.spread;
+            const L = r.band?.L, U = r.band?.U;
+            const tick = r.tick;
+            const qref = r.qref;
+            const dumpFlag = !!r.micro?.dumpSell;
+            const bandTouch = (typeof bestBid === 'number' && typeof L === 'number' && typeof tick === 'number' && bestBid <= L + tick + 1e-9);
+            const noBids = !(typeof bestBid === 'number' && bestBid > 0);
+            const tts = r.timeToBandSellSec;
+            const drift = r.driftBps;
+            const ticksToBand = (typeof bestBid === 'number' && typeof L === 'number' && typeof tick === 'number' && tick > 0)
+                ? Math.max(0, Math.floor((bestBid - L) / tick))
+                : Infinity;
+            const condTime = (typeof tts === 'number' && tts > 0 && tts <= 120) || (typeof drift === 'number' && drift <= -3);
+            const condDepth = (() => {
+                const qband = r.deltas?.sell?.toBand?.shares;
+                if (typeof qband === 'number' && typeof qref === 'number' && qref > 0 && qband <= 3 * qref) return true;
+                return Number.isFinite(ticksToBand) && ticksToBand <= 5;
+            })();
+            const condPressure = (() => {
+                const obi = r.micro?.obiPct;
+                const combinedSell = r.combined?.sell;
+                return (typeof obi === 'number' && obi <= -20) || (typeof combinedSell === 'number' && combinedSell >= 50);
+            })();
+            const depthConf = (typeof r.depthConfidence === 'number') ? r.depthConfidence : 1.0;
+            const exitSoon = !dumpFlag && depthConf >= 0.7 && [condTime, condDepth, condPressure].filter(Boolean).length >= 2;
+            let decisionLabel = 'Not yet';
+            let decisionStyle = 'background:#198754;color:white;';
+            let decisionTooltip = 'Green = safe, Orange = likely near band soon, Red = exit now';
+            if (exitSoon) { decisionLabel = 'EXIT Soon'; decisionStyle = 'background:#fd7e14;color:white;'; decisionTooltip = 'Time-to-band =120s or drift =-3bps/s, plus depth or pressure risk; two of three signals needed'; }
+            if (dumpFlag) { decisionLabel = 'EXIT NOW'; decisionStyle = 'background:#dc3545;color:white;'; decisionTooltip = 'Dump criteria met (score above baseline with time/trend/pressure confirmation)'; }
+            // Build compact table
+            const legendLabel = dumpFlag ? 'High' : (r.combined?.legend || r.scores?.legend || 'Low');
+            container.innerHTML = `
+                <div class="chip-impact-head">
+                  <span class="score-chip">Score <i class="bi bi-info-circle" data-bs-toggle="tooltip" title="0&ndash;100 mix of ticks moved, VWAP % vs band, depth coverage, spread fragility, IOI; stage factor: ESM&ndash;1=1.00, ESM&ndash;2 entry=1.20, buffer/uncross=1.10."></i> &nbsp; Sell ${sellScore} &middot; Buy ${buyScore}</span>
+                  <span class="legend-chip ${dumpFlag ? 'impact-high' : legendCls}">${legendLabel}</span>
+                  <span class="badge ms-2" style="${decisionStyle}" data-bs-toggle="tooltip" title="${decisionTooltip}">Sell: ${decisionLabel}</span>
+                </div>
+                <table class="chip-impact-table">
+                  <tr><td>Tick <i class="bi bi-info-circle" data-bs-toggle="tooltip" title="Tick size from instrument master; fallback heuristics if missing"></i></td><td>${fmt(tick)}</td><td class="right">Qref <i class="bi bi-info-circle" data-bs-toggle="tooltip" title="Reference size (uses holding qty when available; else max(ltq, 0.1% of visible) clipped)"></i></td><td class="right">${qref ?? '-'} </td></tr>
+                  <tr><td>B1/A1 <i class="bi bi-info-circle" data-bs-toggle="tooltip" title="Best bid/ask and spread at snapshot"></i></td><td colspan="3">${fmt(bestBid)} / ${fmt(bestAsk)} <span class="muted">(spr ${fmt(spr)})</span></td></tr>
+                  <tr><td>Max order</td><td colspan="3">${fmtOrder('Bid', r.maxBuyOrderQty, r.maxBuyOrderCount, r.maxBuyOrderPrice)} / ${fmtOrder('Ask', r.maxSellOrderQty, r.maxSellOrderCount, r.maxSellOrderPrice)}</td></tr>
+                  <tr class="${(bandTouch || dumpFlag || noBids) ? 'impact-high' : legendCls}"><td>&Delta;SELL <i class="bi bi-info-circle" data-bs-toggle="tooltip" title="Minimal shares to move by 1 tick or to band; shows resulting price"></i></td><td>1t ${q(r.deltas?.sell?.oneTick)}@${p(r.deltas?.sell?.oneTick)}</td><td>&rarr; Band</td><td class="right">${q(r.deltas?.sell?.toBand)}@${p(r.deltas?.sell?.toBand)}</td></tr>
+                  <tr class="${(bandTouch || dumpFlag || noBids) ? 'impact-high' : legendCls}"><td>&Delta;BUY <i class="bi bi-info-circle" data-bs-toggle="tooltip" title="Minimal shares to move by 1 tick or to band; shows resulting price"></i></td><td>${noBids ? 'No bids' : `1t ${q(r.deltas?.buy?.oneTick)}@${p(r.deltas?.buy?.oneTick)}`}</td><td>&rarr; Band</td><td class="right">${noBids ? '-' : `${q(r.deltas?.buy?.toBand)}@${p(r.deltas?.buy?.toBand)}`}</td></tr>
+                  <!-- Score moved to header -->
+
+                </table>`;
+            // Prefer combined legend and append micro chips row
+            try{
+                const chipLegendEl = container.querySelector('.legend-chip');
+                if (chipLegendEl) chipLegendEl.textContent = (r.combined?.legend || r.scores?.legend || 'Low');
+                const tbl = container.querySelector('.chip-impact-table');
+                if (tbl){
+                    const tr = document.createElement('tr');
+                    const obiStr = (typeof r.micro?.obiPct==='number') ? ((r.micro.obiPct>0?'+':'')+r.micro.obiPct+'%') : '-';
+                    const swingStr = (typeof r.micro?.swingSell==='number') ? r.micro.swingSell.toFixed(2) : '-';
+                    const microStr = (typeof r.micro?.microSell==='number') ? r.micro.microSell.toFixed(2) : '-';
+                    const dumpStr = r.micro?.dumpSell ? 'YES' : 'NO';
+                    const driftStr = fmtBps(r.driftBps);
+                    const ltqStr = fmt(r.ltqPerSec) + '/s';
+                    const tts = fmtSec(r.timeToBandSellSec);
+                    const ttb = fmtSec(r.timeToBandBuySec);
+                    tr.innerHTML = `<td>Micro</td><td colspan="3">OBI ${obiStr} &middot; Swing ${swingStr} &middot; Micro ${microStr} &middot; Drift ${driftStr} &middot; LTQ ${ltqStr} &middot; TTB S ${tts} / B ${ttb} &middot; Dump ${dumpStr}</td>`;
+                    tbl.appendChild(tr);
+                }
+            } catch(_){}
+        }
+        // Legend icon removed; per-field tooltips are provided in-table
+    } catch(_){}
 }
 
 // Safe depth card renderer with robust fallbacks for missing fields
 function renderSafeDepthCard(symbol, entry){
     const card = document.createElement('div');
     card.className = 'et-depth-panel small';
+    card.dataset.symbol = symbol;
     const buy = entry?.buyQuantity || 0;
     const sell = entry?.sellQuantity || 0;
     const pressure = formatPressure(buy, sell);
     const ltp = entry?.ltp ?? '-';
     const ts = entry?.capturedAt ?? '-';
+    const tsFmt = formatIst(ts);
+    const lttFmt = formatIst(entry?.ltt);
+    const lttDisp = (lttFmt && lttFmt !== '-') ? lttFmt : tsFmt;
     const buys = Array.isArray(entry?.buyLevels) ? entry.buyLevels : [];
     const sells = Array.isArray(entry?.sellLevels) ? entry.sellLevels : [];
     const rows = Math.max(buys.length, sells.length, 5);
@@ -399,10 +609,10 @@ function renderSafeDepthCard(symbol, entry){
         ladder += `<tr>
             <td class="et-bid">${b.price ?? ''}</td>
             <td class="et-bid">${b.orders ?? ''}</td>
-            <td class="et-bid">${b.quantity ?? ''}</td>
+            <td class="et-bid">${formatInr(b.quantity ?? '')}</td>
             <td class="et-ask">${s.price ?? ''}</td>
             <td class="et-ask">${s.orders ?? ''}</td>
-            <td class="et-ask">${s.quantity ?? ''}</td>
+            <td class="et-ask">${formatInr(s.quantity ?? '')}</td>
         </tr>`;
     }
     const dash = '&mdash;';
@@ -428,16 +638,16 @@ function renderSafeDepthCard(symbol, entry){
             <div class="meta"><span class="et-depth-muted">Lower circuit:</span> ${entry?.lowerCircuit ?? dash}</div>
             <div class="meta"><span class="et-depth-muted">Upper circuit:</span> ${entry?.upperCircuit ?? dash}</div>
             <div class="meta"><span class="et-depth-muted">LTQ:</span> ${entry?.ltq ?? dash}</div>
-            <div class="meta"><span class="et-depth-muted">LTT:</span> ${entry?.ltt ?? dash}</div>
+            <div class="meta"><span class="et-depth-muted">LTT:</span> ${lttDisp}</div>
             <div class="meta"><span class="et-depth-muted">Pressure:</span> ${pressure}</div>
-            <div class="meta"><span class="et-depth-muted">Updated:</span> ${ts}</div>
+            <div class="meta"><span class="et-depth-muted">Updated:</span> ${tsFmt}</div>
         </div>`;
     return card;
 }
 
 function applyDepthPage(newPage){
     const cards = state.depthCards || [];
-    const size = state.depthPageSize || 2;
+    const size = state.depthPageSize || 3;
     if (typeof newPage === 'number') state.depthPage = newPage;
     const totalPages = Math.max(1, Math.ceil(cards.length / size));
     if (state.depthPage < 0) state.depthPage = 0;
@@ -451,6 +661,7 @@ function applyDepthPage(newPage){
     const next = document.getElementById('depth-next');
     if (prev) prev.disabled = state.depthPage === 0;
     if (next) next.disabled = state.depthPage >= totalPages - 1;
+    // Impact shown on holdings chips; depth paging is independent
 }
 
 function buildDepthCard(symbol, entry){
@@ -461,6 +672,9 @@ function buildDepthCard(symbol, entry){
     const pressure = formatPressure(buy, sell);
     const ltp = entry?.ltp ?? '-';
     const ts = entry?.capturedAt ?? '-';
+    const tsFmt = formatIst(ts);
+    const lttFmt = formatIst(entry?.ltt);
+    const lttDisp = (lttFmt && lttFmt !== '-') ? lttFmt : tsFmt;
     const buys = Array.isArray(entry?.buyLevels) ? entry.buyLevels : [];
     const sells = Array.isArray(entry?.sellLevels) ? entry.sellLevels : [];
     const rows = Math.max(buys.length, sells.length, 5);
@@ -470,10 +684,10 @@ function buildDepthCard(symbol, entry){
         ladder += `<tr>
             <td class="et-bid">${b.price ?? ''}</td>
             <td class="et-bid">${b.orders ?? ''}</td>
-            <td class="et-bid">${b.quantity ?? ''}</td>
+            <td class="et-bid">${formatInr(b.quantity ?? '')}</td>
             <td class="et-ask">${s.price ?? ''}</td>
             <td class="et-ask">${s.orders ?? ''}</td>
-            <td class="et-ask">${s.quantity ?? ''}</td>
+            <td class="et-ask">${formatInr(s.quantity ?? '')}</td>
         </tr>`;
     }
     card.innerHTML = `
@@ -489,18 +703,18 @@ function buildDepthCard(symbol, entry){
             <tbody>${ladder}</tbody>
         </table>
         <div class="et-depth-meta">
-            <div class="meta"><span class="et-depth-muted">Open:</span> ${entry?.open ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">Prev. Close:</span> ${entry?.prevClose ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">Low:</span> ${entry?.low ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">High:</span> ${entry?.high ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">Volume:</span> ${entry?.volume ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">Avg. price:</span> ${entry?.avgPrice ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">Lower circuit:</span> ${entry?.lowerCircuit ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">Upper circuit:</span> ${entry?.upperCircuit ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">LTQ:</span> ${entry?.ltq ?? '—'}</div>
-            <div class="meta"><span class="et-depth-muted">LTT:</span> ${entry?.ltt ?? '—'}</div>
+            <div class="meta"><span class="et-depth-muted">Open:</span> ${entry?.open ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">Prev. Close:</span> ${entry?.prevClose ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">Low:</span> ${entry?.low ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">High:</span> ${entry?.high ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">Volume:</span> ${entry?.volume ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">Avg. price:</span> ${entry?.avgPrice ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">Lower circuit:</span> ${entry?.lowerCircuit ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">Upper circuit:</span> ${entry?.upperCircuit ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">LTQ:</span> ${entry?.ltq ?? 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</div>
+            <div class="meta"><span class="et-depth-muted">LTT:</span> ${lttDisp}</div>
             <div class="meta"><span class="et-depth-muted">Pressure:</span> ${pressure}</div>
-            <div class="meta"><span class="et-depth-muted">Updated:</span> ${ts}</div>
+            <div class="meta"><span class="et-depth-muted">Updated:</span> ${tsFmt}</div>
         </div>`;
     return card;
 }
@@ -541,7 +755,8 @@ async function fetchSessionStatus() {
             state.sessionActive = true;
             badge.className = 'badge bg-success';
             const userLabel = status.user ? `as ${status.user}` : '';
-            badge.innerHTML = `<i class="bi bi-check-circle me-1"></i>Active → Expires ${status.expiry ?? ''}`;
+            const expiryIst = expiryMs ? formatIst(expiryMs) : '-';
+            badge.innerHTML = `<i class="bi bi-check-circle me-1"></i>Active ${userLabel ? userLabel + ' ' : ''}— Expires ${expiryIst}`;
             if (etaEl) {
                 const ms = expiryMs - Date.now();
                 const m = Math.max(0, Math.round(ms / 60000));
@@ -610,10 +825,13 @@ function scheduleAutoRefresh() {
     if (state.scheduleHandle) clearInterval(state.scheduleHandle);
     if (state.depthHandle) clearInterval(state.depthHandle);
     if (state.sessionHandle) clearInterval(state.sessionHandle);
+    if (state.newsHandle) clearInterval(state.newsHandle);
     // Schedules: every 15s, Depth: every 8s, Session status: every 60s
     state.scheduleHandle = setInterval(refreshSchedules, 15000);
     state.depthHandle = setInterval(refreshDepth, 8000);
     state.sessionHandle = setInterval(fetchSessionStatus, 60000);
+    // News: every 5 minutes
+    state.newsHandle = setInterval(fetchNews, 300000);
 }
 
 function setTooltip(el, title) {
@@ -831,6 +1049,8 @@ function showScheduleErrorModal(message){
 }
 
 async function init() {
+    // Kick off news fetch immediately (don’t wait for other calls)
+    fetchNews().catch(() => {});
     await loadUsers();
     setupFormHandlers();
     // Initial fetches
@@ -882,3 +1102,22 @@ function showToast(message){
         el.addEventListener('hidden.bs.toast', () => el.remove());
     } catch(_) { console.log(message); }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

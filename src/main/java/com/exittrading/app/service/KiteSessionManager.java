@@ -20,14 +20,20 @@ public class KiteSessionManager {
             runnable -> {
                 Thread t = new Thread(runnable);
                 t.setName("order-exec-" + t.getId());
-                t.setDaemon(true);
+                // Use non-daemon to avoid premature JVM exit on certain runtimes
+                // t.setDaemon(true);
+                t.setUncaughtExceptionHandler((thr, ex) ->
+                        log.error("Uncaught exception in {}", thr.getName(), ex));
                 return t;
             });
 
     private final ExecutorService marketDataPool = Executors.newCachedThreadPool(runnable -> {
         Thread t = new Thread(runnable);
         t.setName("depth-pool-" + t.getId());
-        t.setDaemon(true);
+        // Use non-daemon to avoid premature JVM exit on certain runtimes
+        // t.setDaemon(true);
+        t.setUncaughtExceptionHandler((thr, ex) ->
+                log.error("Uncaught exception in {}", thr.getName(), ex));
         return t;
     });
 

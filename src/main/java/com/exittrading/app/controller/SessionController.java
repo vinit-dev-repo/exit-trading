@@ -55,17 +55,40 @@ public class SessionController {
     public ResponseEntity<?> login(@RequestBody Map<String, String> payload) {
         try {
             String requestToken = payload.get("requestToken");
-            LoginResult res = performLogin(requestToken);
-            return ResponseEntity.ok(Map.of("status", "connected", "user", res.userName, "expiry", res.expiry));
-        } catch (ClassNotFoundException ex) {
-            log.error("KiteConnect jar not found", ex);
-            return ResponseEntity.status(500).body(Map.of(
-                    "status", "error",
-                    "message", "KiteConnect library not available on classpath. Upload kiteconnect.jar to lib/ and restart."
-            ));
+            log.info("Kite login attempt received (tokenLen={})", requestToken != null ? requestToken.length() : 0);
+            // Guard against SDK/network stalls by enforcing a hard timeout
+            java.util.concurrent.ExecutorService tmp = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                LoginResult res = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return performLogin(requestToken);
+                    } catch (Exception e) {
+                        throw new java.util.concurrent.CompletionException(e);
+                    }
+                }, tmp).get(15, java.util.concurrent.TimeUnit.SECONDS);
+                log.info("Kite login success for {} (expires {})", res.userName, res.expiry);
+                return ResponseEntity.ok(Map.of("status", "connected", "user", res.userName, "expiry", res.expiry));
+            } catch (java.util.concurrent.TimeoutException tex) {
+                log.error("Kite login timed out (tokenLen={})", requestToken != null ? requestToken.length() : 0);
+                return ResponseEntity.status(504).body(Map.of("status", "error", "message", "Kite login timed out"));
+            } finally {
+                try { tmp.shutdownNow(); } catch (Exception ignored) {}
+            }
         } catch (Exception ex) {
-            log.error("Kite login failed", ex);
-            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+            Throwable cause = ex;
+            if (cause instanceof java.util.concurrent.ExecutionException ee && ee.getCause() != null) {
+                cause = ee.getCause();
+            } else if (cause instanceof java.util.concurrent.CompletionException ce && ce.getCause() != null) {
+                cause = ce.getCause();
+            }
+            if (cause instanceof ClassNotFoundException) {
+                log.error("KiteConnect jar not found", cause);
+                return ResponseEntity.status(500).body(Map.of(
+                        "status", "error",
+                        "message", "KiteConnect library not available on classpath. Upload kiteconnect.jar to lib/ and restart."
+                ));
+            }
+            log.error("Kite login failed (tokenLen={})", (payload != null && payload.get("requestToken") != null) ? payload.get("requestToken").length() : 0, ex);
             String msg = (cause.getClass().getSimpleName() + (cause.getMessage() != null ? (": " + cause.getMessage()) : ""));
             return ResponseEntity.badRequest().body(Map.of("status", "error", "message", msg));
         }

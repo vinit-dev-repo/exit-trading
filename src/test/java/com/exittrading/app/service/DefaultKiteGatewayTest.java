@@ -24,12 +24,14 @@ class DefaultKiteGatewayTest {
     private KiteSessionManager sessionManager;
     private DefaultKiteGateway gateway;
     private FixedIstClock clock;
+    private InstrumentService instrumentService;
 
     @BeforeEach
     void setUp() {
         clock = new FixedIstClock(ZonedDateTime.of(2024, 5, 1, 10, 0, 0, 0, ZoneId.of("Asia/Kolkata")));
         sessionManager = new KiteSessionManager(clock);
-        gateway = new DefaultKiteGateway(sessionManager, clock);
+        instrumentService = new InstrumentService(sessionManager);
+        gateway = new DefaultKiteGateway(sessionManager, clock, instrumentService);
         setExchange("NSE");
         KiteConnect.ORDERS.clear();
         KiteConnect.CANCELLED.clear();

@@ -65,6 +65,19 @@ public class DepthView {
     private BigDecimal upperCircuit;
     private Long ltq; // last traded quantity
     private String ltt; // last traded time as string
+    // Optional metadata and derived metrics
+    private Double tick;                 // true tick size if available
+    private Long exitQuantity;           // position size to stress-test impact
+    private Double driftBps;             // price drift toward band (bps per second)
+    private Double ltqPerSec;            // trade velocity (shares per second)
+    private Double timeToBandSellSec;    // estimated seconds to hit lower band
+    private Double timeToBandBuySec;     // estimated seconds to hit upper band
+    private Long maxBuyOrderQty;         // largest single order on bid side
+    private Long maxSellOrderQty;        // largest single order on ask side
+    private Integer maxBuyOrderCount;    // number of orders at that max bid level
+    private Integer maxSellOrderCount;   // number of orders at that max ask level
+    private Double maxBuyOrderPrice;     // price of the max bid level
+    private Double maxSellOrderPrice;    // price of the max ask level
 
     public String getTradingsymbol() {
         return tradingsymbol;
@@ -131,4 +144,40 @@ public class DepthView {
     public void setLtq(Long ltq) { this.ltq = ltq; }
     public String getLtt() { return ltt; }
     public void setLtt(String ltt) { this.ltt = ltt; }
+
+    public Double getTick() { return tick; }
+    public void setTick(Double tick) { this.tick = tick; }
+
+    public Long getExitQuantity() { return exitQuantity; }
+    public void setExitQuantity(Long exitQuantity) { this.exitQuantity = exitQuantity; }
+
+    public Double getDriftBps() { return driftBps; }
+    public void setDriftBps(Double driftBps) { this.driftBps = driftBps; }
+
+    public Double getLtqPerSec() { return ltqPerSec; }
+    public void setLtqPerSec(Double ltqPerSec) { this.ltqPerSec = ltqPerSec; }
+
+    public Double getTimeToBandSellSec() { return timeToBandSellSec; }
+    public void setTimeToBandSellSec(Double timeToBandSellSec) { this.timeToBandSellSec = timeToBandSellSec; }
+
+    public Double getTimeToBandBuySec() { return timeToBandBuySec; }
+    public void setTimeToBandBuySec(Double timeToBandBuySec) { this.timeToBandBuySec = timeToBandBuySec; }
+
+    public Long getMaxBuyOrderQty() { return maxBuyOrderQty; }
+    public void setMaxBuyOrderQty(Long maxBuyOrderQty) { this.maxBuyOrderQty = maxBuyOrderQty; }
+
+    public Long getMaxSellOrderQty() { return maxSellOrderQty; }
+    public void setMaxSellOrderQty(Long maxSellOrderQty) { this.maxSellOrderQty = maxSellOrderQty; }
+
+    public Integer getMaxBuyOrderCount() { return maxBuyOrderCount; }
+    public void setMaxBuyOrderCount(Integer maxBuyOrderCount) { this.maxBuyOrderCount = maxBuyOrderCount; }
+
+    public Integer getMaxSellOrderCount() { return maxSellOrderCount; }
+    public void setMaxSellOrderCount(Integer maxSellOrderCount) { this.maxSellOrderCount = maxSellOrderCount; }
+
+    public Double getMaxBuyOrderPrice() { return maxBuyOrderPrice; }
+    public void setMaxBuyOrderPrice(Double maxBuyOrderPrice) { this.maxBuyOrderPrice = maxBuyOrderPrice; }
+
+    public Double getMaxSellOrderPrice() { return maxSellOrderPrice; }
+    public void setMaxSellOrderPrice(Double maxSellOrderPrice) { this.maxSellOrderPrice = maxSellOrderPrice; }
 }

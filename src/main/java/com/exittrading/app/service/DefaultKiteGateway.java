@@ -27,13 +27,17 @@ public class DefaultKiteGateway implements KiteGateway {
 
     private final KiteSessionManager sessionManager;
     private final IstClock clock;
+    private final InstrumentService instrumentService;
+    // Sticky max-order tracker for REST depth (persists for process lifetime)
+    private final java.util.concurrent.ConcurrentHashMap<String, MaxTracker> maxTrackerByKey = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Value("${kite.default.exchange:NSE}")
     private String exchange;
 
-    public DefaultKiteGateway(KiteSessionManager sessionManager, IstClock clock) {
+    public DefaultKiteGateway(KiteSessionManager sessionManager, IstClock clock, InstrumentService instrumentService) {
         this.sessionManager = sessionManager;
         this.clock = clock;
+        this.instrumentService = instrumentService;
     }
 
     // Simple in-memory cache to avoid repeatedly scanning instruments
@@ -56,6 +60,16 @@ public class DefaultKiteGateway implements KiteGateway {
                 setField(orderParamsClass, orderParams, "tradingsymbol", resolvedSymbol);
                 setField(orderParamsClass, orderParams, "quantity", schedule.getQuantity());
 
+                // Band metadata to avoid circuit rejections for market exits
+                Double lowerBand = null, upperBand = null;
+                try {
+                    InstrumentService.InstrumentMeta meta = instrumentService.find(resolvedExchange, resolvedSymbol, schedule.getInstrumentToken());
+                    if (meta != null) {
+                        lowerBand = meta.lowerCircuit;
+                        upperBand = meta.upperCircuit;
+                    }
+                } catch (Exception ignored) {}
+
                 // Transaction and order type
                 Object txnBuy = safeStaticField(orderParamsClass, "TRANSACTION_TYPE_BUY", "BUY");
                 Object txnSell = safeStaticField(orderParamsClass, "TRANSACTION_TYPE_SELL", "SELL");
@@ -63,8 +77,20 @@ public class DefaultKiteGateway implements KiteGateway {
                 Object ordMarket = safeStaticField(orderParamsClass, "ORDER_TYPE_MARKET", "MARKET");
                 setField(orderParamsClass, orderParams, "transactionType",
                         schedule.getSide() == OrderSide.BUY ? txnBuy : txnSell);
-                setField(orderParamsClass, orderParams, "orderType",
-                        schedule.getLimitPrice() != null ? ordLimit : ordMarket);
+                boolean isMarket = schedule.getLimitPrice() == null;
+                // If hitting circuit on SELL/BUY, clamp to band with LIMIT to avoid 400 from exchange
+                if (isMarket && schedule.getSide() == OrderSide.SELL && lowerBand != null) {
+                    setField(orderParamsClass, orderParams, "orderType", ordLimit);
+                    setField(orderParamsClass, orderParams, "price", lowerBand);
+                    isMarket = false;
+                } else if (isMarket && schedule.getSide() == OrderSide.BUY && upperBand != null) {
+                    setField(orderParamsClass, orderParams, "orderType", ordLimit);
+                    setField(orderParamsClass, orderParams, "price", upperBand);
+                    isMarket = false;
+                } else {
+                    setField(orderParamsClass, orderParams, "orderType",
+                            schedule.getLimitPrice() != null ? ordLimit : ordMarket);
+                }
 
                 // Misc
                 setField(orderParamsClass, orderParams, "exchange", resolvedExchange);
@@ -77,7 +103,7 @@ public class DefaultKiteGateway implements KiteGateway {
                         safeStaticField(orderParamsClass, "VALIDITY_DAY", "DAY"));
                 if (schedule.getLimitPrice() != null) {
                     setField(orderParamsClass, orderParams, "price", schedule.getLimitPrice().doubleValue());
-                } else {
+                } else if (isMarket) {
                     // MARKET protection required by Kite on some scrips; -1 lets backend auto-apply
                     try { setField(orderParamsClass, orderParams, "marketProtection", -1); } catch (Exception ignored) {}
                 }
@@ -310,6 +336,17 @@ public class DefaultKiteGateway implements KiteGateway {
                     viewSymbol = viewSymbol.substring(colon + 1);
                 }
                 view.setTradingsymbol(viewSymbol);
+                // Enrich with instrument metadata (tick, circuits) if available
+                try {
+                    String exchPart = instrument.contains(":") ? instrument.substring(0, instrument.indexOf(':')) : null;
+                    InstrumentService.InstrumentMeta meta = instrumentService.find(exchPart, viewSymbol,
+                            instrumentToken != null && !instrumentToken.isBlank() ? instrumentToken : resolvedToken);
+                    if (meta != null) {
+                        if (meta.tickSize != null) view.setTick(meta.tickSize);
+                        if (meta.lowerCircuit != null && view.getLowerCircuit() == null) view.setLowerCircuit(BigDecimal.valueOf(meta.lowerCircuit));
+                        if (meta.upperCircuit != null && view.getUpperCircuit() == null) view.setUpperCircuit(BigDecimal.valueOf(meta.upperCircuit));
+                    }
+                } catch (Exception ignoredMeta) {}
                 if (depthMap != null) {
                     log.info("Depth map size={} keys={}", depthMap.size(), depthMap.keySet());
                     Object quote = null;
@@ -322,14 +359,30 @@ public class DefaultKiteGateway implements KiteGateway {
                         if (quote instanceof java.util.Map<?,?> qmap) {
                             Object depthObj = qmap.get("depth");
                             if (depthObj instanceof java.util.Map<?,?> dmap) {
-                                Object buyLevels = dmap.get("buy");
-                                Object sellLevels = dmap.get("sell");
-                                long buyQty = aggregateDepth(buyLevels);
-                                long sellQty = aggregateDepth(sellLevels);
+                                Object buyLevelsRaw = dmap.get("buy");
+                                Object sellLevelsRaw = dmap.get("sell");
+                                long buyQty = aggregateDepth(buyLevelsRaw);
+                                long sellQty = aggregateDepth(sellLevelsRaw);
+                                java.util.List<DepthView.Level> buyLevels = mapLevels(buyLevelsRaw);
+                                java.util.List<DepthView.Level> sellLevels = mapLevels(sellLevelsRaw);
                                 view.setBuyQuantity(buyQty);
                                 view.setSellQuantity(sellQty);
-                                view.setBuyLevels(mapLevels(buyLevels));
-                                view.setSellLevels(mapLevels(sellLevels));
+                                view.setBuyLevels(buyLevels);
+                                view.setSellLevels(sellLevels);
+                                MaxTracker tracker = maxTrackerByKey.computeIfAbsent(keyFor(instrument, instrumentToken, resolvedToken), k -> new MaxTracker());
+                                tracker.updateFromTop(!buyLevels.isEmpty() ? buyLevels.get(0) : null, !sellLevels.isEmpty() ? sellLevels.get(0) : null);
+                                MaxOrderInfo maxBid = tracker.getBid();
+                                MaxOrderInfo maxAsk = tracker.getAsk();
+                                if (maxBid != null) {
+                                    view.setMaxBuyOrderQty(maxBid.qty);
+                                    view.setMaxBuyOrderCount(maxBid.orders);
+                                    view.setMaxBuyOrderPrice(maxBid.price);
+                                }
+                                if (maxAsk != null) {
+                                    view.setMaxSellOrderQty(maxAsk.qty);
+                                    view.setMaxSellOrderCount(maxAsk.orders);
+                                    view.setMaxSellOrderPrice(maxAsk.price);
+                                }
                             }
                             Number lastPrice = asNumber(qmap.get("lastPrice"));
                             if (lastPrice == null) lastPrice = asNumber(qmap.get("lastTradedPrice"));
@@ -365,14 +418,30 @@ public class DefaultKiteGateway implements KiteGateway {
                             Object depth = getField(quoteClass, quote, "depth");
                             if (depth != null) {
                                 Class<?> depthClass = depth.getClass();
-                                Object buyLevels = getField(depthClass, depth, "buy");
-                                Object sellLevels = getField(depthClass, depth, "sell");
-                                long buyQty = aggregateDepth(buyLevels);
-                                long sellQty = aggregateDepth(sellLevels);
+                                Object buyLevelsRaw = getField(depthClass, depth, "buy");
+                                Object sellLevelsRaw = getField(depthClass, depth, "sell");
+                                long buyQty = aggregateDepth(buyLevelsRaw);
+                                long sellQty = aggregateDepth(sellLevelsRaw);
+                                java.util.List<DepthView.Level> buyLevels = mapLevels(buyLevelsRaw);
+                                java.util.List<DepthView.Level> sellLevels = mapLevels(sellLevelsRaw);
                                 view.setBuyQuantity(buyQty);
                                 view.setSellQuantity(sellQty);
-                                view.setBuyLevels(mapLevels(buyLevels));
-                                view.setSellLevels(mapLevels(sellLevels));
+                                view.setBuyLevels(buyLevels);
+                                view.setSellLevels(sellLevels);
+                                MaxTracker tracker = maxTrackerByKey.computeIfAbsent(keyFor(instrument, instrumentToken, resolvedToken), k -> new MaxTracker());
+                                tracker.updateFromTop(!buyLevels.isEmpty() ? buyLevels.get(0) : null, !sellLevels.isEmpty() ? sellLevels.get(0) : null);
+                                MaxOrderInfo maxBid = tracker.getBid();
+                                MaxOrderInfo maxAsk = tracker.getAsk();
+                                if (maxBid != null) {
+                                    view.setMaxBuyOrderQty(maxBid.qty);
+                                    view.setMaxBuyOrderCount(maxBid.orders);
+                                    view.setMaxBuyOrderPrice(maxBid.price);
+                                }
+                                if (maxAsk != null) {
+                                    view.setMaxSellOrderQty(maxAsk.qty);
+                                    view.setMaxSellOrderCount(maxAsk.orders);
+                                    view.setMaxSellOrderPrice(maxAsk.price);
+                                }
                             }
                             Number lastPrice = (Number) getField(quoteClass, quote, "lastPrice");
                             if (lastPrice == null) lastPrice = (Number) getField(quoteClass, quote, "lastTradedPrice");
@@ -503,6 +572,77 @@ public class DefaultKiteGateway implements KiteGateway {
             }
         }
         return total;
+    }
+
+    private String keyFor(String instrument, String instrumentToken, String resolvedToken){
+        if (instrumentToken != null && !instrumentToken.isBlank()) return instrumentToken;
+        if (resolvedToken != null && !resolvedToken.isBlank()) return resolvedToken;
+        return instrument != null ? instrument : "unknown";
+    }
+
+    private static class MaxOrderInfo {
+        final Long qty;
+        final Integer orders;
+        final Double price;
+        MaxOrderInfo(Long qty, Integer orders, Double price) { this.qty = qty; this.orders = orders; this.price = price; }
+    }
+    private static class MaxTracker {
+        private static class PriceState {
+            long lastQty;
+            int lastOrders;
+            long maxDeltaQty;
+            int maxDeltaOrders;
+            final double price;
+            PriceState(double price, long lastQty, int lastOrders) {
+                this.price = price;
+                this.lastQty = lastQty;
+                this.lastOrders = lastOrders;
+                this.maxDeltaQty = 0;
+                this.maxDeltaOrders = 1;
+            }
+        }
+        private final java.util.Map<Double, PriceState> bidStates = new java.util.HashMap<>();
+        private final java.util.Map<Double, PriceState> askStates = new java.util.HashMap<>();
+
+        synchronized void updateFromTop(DepthView.Level topBid, DepthView.Level topAsk){
+            if (topBid != null) updateSide(bidStates, topBid);
+            if (topAsk != null) updateSide(askStates, topAsk);
+        }
+
+        private void updateSide(java.util.Map<Double, PriceState> map, DepthView.Level lvl){
+            double px = lvl.getPrice();
+            long qty = lvl.getQuantity();
+            int orders = lvl.getOrders();
+            PriceState st = map.get(px);
+            if (st == null) {
+                st = new PriceState(px, qty, orders);
+                st.maxDeltaQty = 0;
+                st.maxDeltaOrders = 1;
+                map.put(px, st);
+                return; // first observation baseline
+            }
+            long deltaQty = qty - st.lastQty;
+            int deltaOrders = Math.max(1, orders - st.lastOrders);
+            if (deltaQty > st.maxDeltaQty) {
+                st.maxDeltaQty = deltaQty;
+                st.maxDeltaOrders = deltaOrders;
+            }
+            st.lastQty = qty;
+            st.lastOrders = orders;
+        }
+
+        private MaxOrderInfo best(java.util.Map<Double, PriceState> map){
+            PriceState best = null;
+            for (PriceState st : map.values()) {
+                if (st == null) continue;
+                if (best == null || st.maxDeltaQty > best.maxDeltaQty) best = st;
+            }
+            if (best == null || best.maxDeltaQty <= 0) return null;
+            return new MaxOrderInfo(best.maxDeltaQty, best.maxDeltaOrders, best.price);
+        }
+
+        synchronized MaxOrderInfo getBid(){ return best(bidStates); }
+        synchronized MaxOrderInfo getAsk(){ return best(askStates); }
     }
 
     private List<DepthView.Level> mapLevels(Object levels) {

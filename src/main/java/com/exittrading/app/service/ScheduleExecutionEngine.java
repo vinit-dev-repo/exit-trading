@@ -31,7 +31,10 @@ public class ScheduleExecutionEngine {
     private final ScheduledExecutorService scheduler = new ScheduledThreadPoolExecutor(4, r -> {
         Thread t = new Thread(r);
         t.setName("schedule-exec-" + t.getId());
-        t.setDaemon(true);
+        // Use non-daemon to avoid premature JVM exit on certain runtimes
+        // t.setDaemon(true);
+        t.setUncaughtExceptionHandler((thr, ex) ->
+                log.error("Uncaught exception in {}", thr.getName(), ex));
         return t;
     });
 
@@ -96,11 +99,17 @@ public class ScheduleExecutionEngine {
                 long now = System.nanoTime();
                 long scheduleNano = now + Duration.between(clock.now(), schedule.getNextExecutionTime()).toNanos();
                 if (scheduleNano - now <= cancelWindow) {
-                    kiteGateway.cancelOpenOrders(schedule.getTradingsymbol(), schedule.getSide()).join();
+                    try {
+                        kiteGateway.cancelOpenOrders(schedule.getTradingsymbol(), schedule.getSide())
+                                .get(5, TimeUnit.SECONDS);
+                    } catch (TimeoutException te) {
+                        log.warn("Timed out cancelling open orders for {}", schedule.getTradingsymbol());
+                    }
                 }
             }
             DepthView depth = depthService.captureDepth(schedule);
-            String orderId = kiteGateway.placePcaOrder(schedule).get(1, TimeUnit.SECONDS);
+            // Allow a more reasonable window for order placement
+            String orderId = kiteGateway.placePcaOrder(schedule).get(5, TimeUnit.SECONDS);
             scheduleService.markExecuted(schedule, "Order Id: " + orderId);
             depthService.persistDepth(schedule.getUser(), depth);
             auditLogService.info(schedule, "Order executed", "Order Id: " + orderId);

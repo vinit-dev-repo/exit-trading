@@ -55,11 +55,17 @@ public class AuctionAnalysisService {
             if (swing >= swingConfirm) score += 1.2;
             if (obi > 0) score += 0.8;
 
+            // Spoof detection: large orders flashing at top levels with low execution
+            boolean likelySpoof = detectSpoofing(v);
+            if (likelySpoof) score += 0.5; // Add risk score for spoofing
+
             boolean confirmed = score >= scoreTrigger;
 
             // Recommend limit: best bid minus a tick if we have levels; else null
             Double bestBid = v.getBuyLevels() != null && !v.getBuyLevels().isEmpty() ? v.getBuyLevels().get(0).getPrice() : null;
-            Double recommended = bestBid != null ? (bestBid - estimateTick(bestBid)) : null;
+            // Use actual tick if available, else estimate
+            double tickSize = v.getTick() != null ? v.getTick() : (bestBid != null ? estimateTick(bestBid) : 0.05);
+            Double recommended = bestBid != null ? (bestBid - tickSize) : null;
 
             DetectionSummary d = new DetectionSummary();
             d.setTradingsymbol(sym);
@@ -67,7 +73,7 @@ public class AuctionAnalysisService {
             d.setSwing(round(swing, 3));
             d.setSellSpikeScore(round(score, 2));
             d.setConfirmed(confirmed);
-            d.setLikelySpoof(false); // TODO: add spoof heuristic
+            d.setLikelySpoof(likelySpoof);
             d.setRecommendedLimit(recommended != null ? round(recommended, 2) : null);
             out.add(d);
         }
@@ -99,10 +105,34 @@ public class AuctionAnalysisService {
         return 0.01;
     }
 
+    private static boolean detectSpoofing(DepthView v) {
+        try {
+            List<DepthView.Level> asks = v.getSellLevels();
+            List<DepthView.Level> bids = v.getBuyLevels();
+            DepthView.Level a1 = (asks != null && !asks.isEmpty()) ? asks.get(0) : null;
+            DepthView.Level a2 = (asks != null && asks.size() > 1) ? asks.get(1) : null;
+            DepthView.Level b1 = (bids != null && !bids.isEmpty()) ? bids.get(0) : null;
+            DepthView.Level b2 = (bids != null && bids.size() > 1) ? bids.get(1) : null;
+            long sumAsk = asks != null ? asks.stream().mapToLong(DepthView.Level::getQuantity).sum() : 0L;
+            long sumBid = bids != null ? bids.stream().mapToLong(DepthView.Level::getQuantity).sum() : 0L;
+            long a1q = a1 != null ? a1.getQuantity() : 0;
+            long a2q = a2 != null ? a2.getQuantity() : 0;
+            long b1q = b1 != null ? b1.getQuantity() : 0;
+            long b2q = b2 != null ? b2.getQuantity() : 0;
+            boolean askSpike = a1q > 0 && a1q >= 5L * Math.max(1L, a2q) && a1q >= Math.max(5000L, (long) (0.30 * sumAsk));
+            boolean bidSpike = b1q > 0 && b1q >= 5L * Math.max(1L, b2q) && b1q >= Math.max(5000L, (long) (0.30 * sumBid));
+            return askSpike || bidSpike;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private static Double round(Double v, int scale) {
         if (v == null) return null;
         double factor = Math.pow(10, scale);
         return Math.round(v * factor) / factor;
     }
-}
 
+    // Expose score trigger for normalization in other services
+    public double getScoreTrigger() { return scoreTrigger; }
+}
