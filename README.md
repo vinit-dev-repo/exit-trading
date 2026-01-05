@@ -36,10 +36,11 @@ An ultra-fast, production-oriented Java trading automation console designed for 
 1. **Prerequisites**: JDK 17+, Maven 3.9+, outbound internet for dependencies.
 2. **Build**: `mvn clean package`
 3. **Run**: `mvn spring-boot:run`
-4. **Access dashboard**: `http://localhost:8080` (login with Spring Security in-memory admin `admin` / `admin123`).
+4. **Access dashboard**: `http://localhost:9090` (login with Spring Security in-memory admin `admin` / `admin123`).
 5. The UI defaults to IST timezone for every display and input. Market depth is simulated when the Kite jar is absent.
 
 Paper trading mode still enforces full PCA scheduling logic, audit logging, and UI updates. Depth data is randomly generated to assist manual validation.
+To force paper trading even when the Kite SDK is present, set `kite.enabled=false` (or `KITE_ENABLED=false`).
 
 ## Enabling live Kite Connect integration
 
@@ -89,7 +90,7 @@ Paper trading mode still enforces full PCA scheduling logic, audit logging, and 
    WantedBy=multi-user.target
    ```
 9. **Enable & start**: `sudo systemctl daemon-reload && sudo systemctl enable --now exit-trading`
-10. **Open firewall**: allow TCP 8080 (or the configured port) from corporate IPs only.
+10. **Open firewall**: allow TCP 9090 (or the configured port) from corporate IPs only.
 11. **Validate**: check `sudo journalctl -u exit-trading -f` and `logs/exittrading.log`.
 
 ### Timezone handling
@@ -132,3 +133,8 @@ Swagger/OpenAPI UI is available at `/swagger-ui.html` for interactive exploratio
 - Plug in Zerodha websocket feeds for real-time depth updates (hook into `DepthService`).
 - Harden security (SAML/ADFS) and SSL termination via ALB.
 
+```bash
+export KITE_API_KEY="atwxtuh4sugm4hvy"
+export KITE_API_SECRET="wpwdshcp11r470fcpj9gqa6ov883drke"
+export DB_PASSWORD="Vvv123"
+```

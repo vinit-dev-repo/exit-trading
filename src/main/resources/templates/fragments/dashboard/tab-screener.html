@@ -1,0 +1,113 @@
+<div th:fragment="tabScreener" class="tab-pane fade" id="tab-screener" role="tabpanel"
+    aria-labelledby="tab-screener-link">
+    <div class="screener-layout row g-3">
+        <div class="col-lg-3 screener-rail">
+            <div class="card shadow-sm screener-card">
+                <div class="card-header bg-dark text-light d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-funnel-fill"></i>
+                        <h5 class="mb-0">Screener</h5>
+                    </div>
+                    <button id="screener-rail-toggle" class="btn btn-sm btn-outline-light"
+                        data-bs-toggle="tooltip" data-bs-placement="bottom"
+                        data-bs-custom-class="tooltip-professional"
+                        title="Hide the screener rail">
+                        <i class="bi bi-layout-sidebar-inset"></i>
+                    </button>
+                </div>
+                <div class="card-body screener-rail-body">
+                    <div class="screener-section">
+                        <div class="screener-section-head">
+                            <h6 class="mb-0">Presets</h6>
+                            <span class="text-muted small">Per user</span>
+                        </div>
+                        <div class="screener-preset-form">
+                            <input id="screener-preset-name" class="form-control form-control-sm"
+                                placeholder="Preset name" />
+                            <div class="d-flex gap-2 mt-2">
+                                <button id="screener-save-preset" class="btn btn-sm btn-success">Save</button>
+                                <button id="screener-save-as" class="btn btn-sm btn-outline-light">Save As</button>
+                                <button id="screener-delete-preset" class="btn btn-sm btn-outline-danger">Delete</button>
+                            </div>
+                        </div>
+                        <div id="screener-presets-list" class="screener-presets-list"></div>
+                    </div>
+
+                    <div class="screener-section">
+                        <div class="screener-section-head">
+                            <h6 class="mb-0">Filters</h6>
+                            <span class="text-muted small">Nested AND / OR</span>
+                        </div>
+                        <div id="screener-filter-builder" class="screener-filter-builder"></div>
+                    </div>
+
+                    <div class="screener-section">
+                        <div class="screener-section-head">
+                            <h6 class="mb-0">Columns</h6>
+                            <span class="text-muted small">Pick to show</span>
+                        </div>
+                        <div id="screener-column-picker" class="screener-column-picker"></div>
+                    </div>
+
+                    <div class="screener-section">
+                        <div class="screener-section-head">
+                            <h6 class="mb-0">Custom Columns</h6>
+                            <span class="text-muted small">Formula outputs</span>
+                        </div>
+                        <div class="screener-custom-form">
+                            <input id="screener-custom-label" class="form-control form-control-sm"
+                                placeholder="Label (e.g. Price vs DMA50)" />
+                            <input id="screener-custom-expression" class="form-control form-control-sm"
+                                placeholder="Expression (e.g. (currentPrice - dma50) / dma50)" />
+                            <button id="screener-add-custom" class="btn btn-sm btn-outline-info w-100 mt-2">
+                                Add custom column
+                            </button>
+                        </div>
+                        <div id="screener-custom-list" class="screener-custom-list"></div>
+                        <div class="text-muted small mt-2">
+                            Use numeric fields from the column list for calculations.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-9 screener-main">
+            <div class="card shadow-sm screener-card">
+                <div class="card-header bg-primary text-light d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Screener Results</h5>
+                        <span id="screener-report-date" class="badge bg-dark">Report: --</span>
+                    </div>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button id="screener-rail-toggle-main" class="btn btn-sm btn-outline-light"
+                            data-bs-toggle="tooltip" data-bs-placement="bottom"
+                            data-bs-custom-class="tooltip-professional"
+                            title="Hide or show the screener rail">
+                            <i class="bi bi-layout-sidebar-inset"></i>
+                        </button>
+                        <input id="screener-report-date-input" type="date"
+                            class="form-control form-control-sm screener-date-input" />
+                        <button id="screener-run" class="btn btn-sm btn-success">Run</button>
+                        <button id="screener-refresh" class="btn btn-sm btn-outline-light">Refresh</button>
+                    </div>
+                </div>
+                <div class="card-body screener-results-body">
+                    <div class="screener-results-meta text-muted small">
+                        <span id="screener-results-count">0 results</span>
+                        <span id="screener-sort-label"></span>
+                    </div>
+                    <div class="screener-table-wrap">
+                        <table class="table table-dark table-sm screener-table">
+                            <thead id="screener-table-head"></thead>
+                            <tbody id="screener-table-body"></tbody>
+                        </table>
+                        <div id="screener-loading" class="text-muted small mt-2 d-none">Loading...</div>
+                        <div id="screener-empty" class="text-muted small mt-2 d-none">No results.</div>
+                        <div id="screener-sentinel"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

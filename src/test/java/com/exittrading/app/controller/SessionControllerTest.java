@@ -1,34 +1,38 @@
 package com.exittrading.app.controller;
 
-import com.exittrading.app.service.IstClock;
-import com.exittrading.app.service.KiteSessionManager;
+import com.exittrading.app.service.core.IstClock;
+import com.exittrading.app.service.core.KiteSessionManager;
+import com.exittrading.app.service.core.SettingsService;
 import com.zerodhatech.kiteconnect.KiteConnect;
 import com.zerodhatech.models.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 
-import java.lang.reflect.Field;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class SessionControllerTest {
 
     private KiteSessionManager sessionManager;
     private SessionController controller;
     private FixedClock clock;
+    private SettingsService settingsService;
 
     @BeforeEach
     void setUp() {
         clock = new FixedClock(ZonedDateTime.of(2024, 5, 1, 9, 0, 0, 0, ZoneId.of("Asia/Kolkata")));
         sessionManager = new KiteSessionManager(clock);
-        controller = new SessionController(sessionManager, clock);
-        setField(controller, "apiKey", "sampleKey");
-        setField(controller, "apiSecret", "sampleSecret");
+        settingsService = mock(SettingsService.class);
+        when(settingsService.getString("kite.apiKey", null)).thenReturn("sampleKey");
+        when(settingsService.getString("kite.apiSecret", null)).thenReturn("sampleSecret");
+        controller = new SessionController(sessionManager, clock, null, null, null, settingsService);
     }
 
     @Test
@@ -51,16 +55,6 @@ class SessionControllerTest {
         assertThat(kite.getAccessToken()).isEqualTo("access-token");
         assertThat(kite.getPublicToken()).isEqualTo("public-token");
         assertThat(kite.getSessionExpiryHook()).isNotNull();
-    }
-
-    private void setField(Object target, String name, Object value) {
-        try {
-            Field field = target.getClass().getDeclaredField(name);
-            field.setAccessible(true);
-            field.set(target, value);
-        } catch (Exception ex) {
-            throw new IllegalStateException(ex);
-        }
     }
 
     private static class FixedClock extends IstClock {

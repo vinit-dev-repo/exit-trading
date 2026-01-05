@@ -14,7 +14,7 @@ import java.time.*;
 public class MarketHoursFilter extends Filter<ILoggingEvent> {
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
-    private static final LocalTime START = LocalTime.of(9, 15);
+    private static final LocalTime START = LocalTime.of(9, 0);
     private static final LocalTime END = LocalTime.of(16, 0);
 
     @Override

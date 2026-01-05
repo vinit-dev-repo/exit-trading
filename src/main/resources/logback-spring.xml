@@ -80,15 +80,80 @@
         </encoder>
     </appender>
 
-    <!-- Route ticker logger to TICKER_FILE only -->
+    <!-- Logging Scrips rolling file (Mon-Fri, 09:15-15:30 IST) -->
+    <appender name="SCRIP_LOG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/scrips.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/scrips-%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>10</maxHistory>
+        </rollingPolicy>
+        <filter class="com.exittrading.app.logging.LoggingWindowFilter" />
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Route ticker logger (holdings depth stream) to scrips log as well -->
     <logger name="ticker" level="INFO" additivity="false">
-        <appender-ref ref="TICKER_FILE"/>
+        <appender-ref ref="SCRIP_LOG_FILE"/>
     </logger>
 
-    <!-- Route liquidity-impact logger to IMPACT_FILE only -->
-    <logger name="impact" level="INFO" additivity="false">
+    <!-- Route ImpactLog logger to IMPACT_FILE only -->
+    <logger name="ImpactLog" level="INFO" additivity="false">
         <appender-ref ref="IMPACT_FILE"/>
     </logger>
+
+    <!-- Route logging scrips to dedicated rolling file -->
+    <logger name="scrip-log" level="INFO" additivity="false">
+        <appender-ref ref="SCRIP_LOG_FILE"/>
+    </logger>
+    <!-- Always-on rolling file (No market hours filter) -->
+    <appender name="ALWAYS_ON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/app-system.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/app-system-%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n%ex</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Route Session/Instrument loggers to ALWAYS_ON_FILE (Relaxed) -->
+    <logger name="com.exittrading.app.service.core.SessionPersistence" level="INFO" additivity="true">
+        <appender-ref ref="ALWAYS_ON_FILE"/>
+    </logger>
+    <logger name="com.exittrading.app.service.core.KiteSessionManager" level="INFO" additivity="true">
+        <appender-ref ref="ALWAYS_ON_FILE"/>
+    </logger>
+    <logger name="com.exittrading.app.controller.SessionController" level="INFO" additivity="true">
+        <appender-ref ref="ALWAYS_ON_FILE"/>
+    </logger>
+    <logger name="com.exittrading.app.service.core.InstrumentService" level="INFO" additivity="true">
+        <appender-ref ref="ALWAYS_ON_FILE"/>
+    </logger>
+    <logger name="com.exittrading.app" level="INFO" additivity="true">
+        <appender-ref ref="ALWAYS_ON_FILE"/>
+    </logger>
+    <!-- LoggingScripService is for data logging, but its system messages (sync etc) might be wanted.
+         However, it's currently routed to SCRIP_LOG_FILE which is filtered.
+         Given the user asked for "instruments", I will also route InstrumentRepository if needed,
+         but LoggingScripService is the main manager. Using ALWAYS_ON implies system ops.
+         I will route LoggingScripService to ALWAYS_ON_FILE as well, removing it from SCRIP_LOG_FILE exclusivity?
+         No, SCRIP_LOG_FILE is for "Scrip Log".
+         I'll leave LoggingScripService as is (filtered) unless explicitly asked, as it logs data row-by-row.
+         Wait, "instruments" likely refers to InstrumentService (metadata).
+    -->
+
+    <!-- Keep LoggingScripService chatter out of app-info; route to scrips log -->
+    <logger name="com.exittrading.app.service.scrip.LoggingScripService" level="INFO" additivity="false">
+        <appender-ref ref="SCRIP_LOG_FILE"/>
+    </logger>
+
+    <!-- Route raw-ticks logger (Removed per Architect recommendation: Single Path DB is sufficient) -->
+    <!-- <logger name="raw-ticks" level="INFO" additivity="false">
+        <appender-ref ref="RAW_TICKS"/>
+    </logger> -->
 
     <!-- Root: console + general + errors -->
     <root level="INFO">

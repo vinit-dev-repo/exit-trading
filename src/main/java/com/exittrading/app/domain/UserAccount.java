@@ -6,12 +6,17 @@ import java.time.ZonedDateTime;
 import java.util.HashSet;
 import java.util.Set;
 
+/**
+ * Entity representing a system user.
+ * Manages user-specific settings like holdings and logging preferences.
+ */
 @Entity
 @Table(name = "users")
 public class UserAccount {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "user_id")
     private Long id;
 
     @Column(unique = true, nullable = false)

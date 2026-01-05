@@ -3,9 +3,9 @@ package com.exittrading.app.controller;
 import com.exittrading.app.domain.ScheduleStatus;
 import com.exittrading.app.dto.ScheduleRequest;
 import com.exittrading.app.dto.ScheduleResponse;
-import com.exittrading.app.service.AdminService;
-import com.exittrading.app.service.ScheduleExecutionEngine;
-import com.exittrading.app.service.ScheduleService;
+import com.exittrading.app.service.core.AdminService;
+import com.exittrading.app.service.schedule.ScheduleExecutionEngine;
+import com.exittrading.app.service.schedule.ScheduleService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -13,6 +13,10 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Controller for managing trading schedules.
+ * Supports CRUD operations for scheduled orders and manual execution triggers.
+ */
 @RestController
 @RequestMapping("/api/schedules")
 public class ScheduleController {

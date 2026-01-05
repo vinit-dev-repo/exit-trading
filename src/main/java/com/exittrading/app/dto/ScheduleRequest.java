@@ -10,6 +10,9 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
+/**
+ * DTO for creating or updating a trading schedule.
+ */
 public class ScheduleRequest {
 
     @NotBlank

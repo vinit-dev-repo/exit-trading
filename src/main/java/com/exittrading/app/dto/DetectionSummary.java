@@ -1,5 +1,8 @@
 package com.exittrading.app.dto;
 
+/**
+ * DTO summarizing the results of spoofing or pressure detection analysis.
+ */
 public class DetectionSummary {
     private String tradingsymbol;
     private Double obi;               // order book imbalance [-1..+1]

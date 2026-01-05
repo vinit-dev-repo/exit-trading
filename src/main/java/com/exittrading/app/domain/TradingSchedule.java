@@ -8,19 +8,24 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 
+/**
+ * Entity representing a scheduled trade.
+ * Contains all parameters required to place an order at a future time.
+ */
 @Entity
 @Table(name = "trading_schedules")
 public class TradingSchedule {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "schedule_id")
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private UserAccount user;
 
-    @Column(nullable = false)
+    @Column(name = "symbol", nullable = false)
     private String tradingsymbol;
 
     @Column(nullable = false)
@@ -44,16 +49,19 @@ public class TradingSchedule {
     @Column(nullable = false)
     private LocalDate tradeDate;
 
+    @Column(name = "next_execution")
     private ZonedDateTime nextExecutionTime;
 
     private ZonedDateTime lastExecutedAt;
 
+    @Column(name = "last_message")
     private String lastExecutionMessage;
 
     private BigDecimal limitPrice;
 
     private boolean autoRepeat;
 
+    @Column(name = "cancel_open_orders")
     private boolean cancelOpenOrdersBeforeExecution = true;
 
     public Long getId() {

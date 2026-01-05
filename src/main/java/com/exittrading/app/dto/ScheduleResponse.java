@@ -7,6 +7,9 @@ import com.exittrading.app.domain.SessionSlot;
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 
+/**
+ * DTO for displaying trading schedule details to the client.
+ */
 public class ScheduleResponse {
     private Long id;
     private String username;

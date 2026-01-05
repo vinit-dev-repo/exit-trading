@@ -1,66 +1,168 @@
-spring:
-  datasource:
-    url: jdbc:h2:mem:exittrading;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
-    driverClassName: org.h2.Driver
-    username: sa
-    password: ''
-  h2:
-    console:
-      enabled: false
-  jpa:
-    hibernate:
-      ddl-auto: update
-    properties:
-      hibernate:
-        format_sql: true
-  jackson:
-    time-zone: Asia/Kolkata
-
+# ==============================================================================
+# Server Configuration
+# ==============================================================================
 server:
+  # Port for the web application (Dashboard & API)
+  port: 9090
   servlet:
     session:
       cookie:
+        # Prevent JavaScript access to session cookies (Security)
         http-only: true
   error:
+    # Always include error message in response (Debug friendly)
     include-message: always
 
+# ==============================================================================
+# Logging Configuration
+# ==============================================================================
 logging:
   level:
     root: INFO
-    com.exittrading: DEBUG
+    # Change to INFO for production to reduce noise
+    # To go to "Quiet Production Mode" (only orders and errors), simply change: com.exittrading: DEBUG -> com.exittrading: INFO.
+    com.exittrading: INFO
+    # Enable ticker logs by setting this to DEBUG (scrip data)
     ticker: INFO
+    # Special logger for Impact Analysis
+    ImpactLog: INFO
   file:
     name: logs/exittrading.log
 
+# ==============================================================================
+# Kite Connect API Credentials
+# ==============================================================================
 kite:
-  apiKey: atwxtuh4sugm4hvy
-  apiSecret: wpwdshcp11r470fcpj9gqa6ov883drke
+  enabled: true
+  # API Key injected from environment variable (Secrets Management)
+  apiKey: ${KITE_API_KEY}
+  # API Secret injected from environment variable
+  apiSecret: ${KITE_API_SECRET}
   default:
+    # Default exchange for instrument lookup
     exchange: BSE
 
+# ==============================================================================
+# Actuator / Management Endpoints
+# ==============================================================================
 management:
   endpoints:
     web:
       exposure:
+        # Expose health check, info, and metrics for monitoring
         include: health,info,metrics
 
+# ==============================================================================
+# Auction Detection Algorithm Parameters
+# ==============================================================================
 auction:
   detector:
+    # Number of levels deep to check in market depth (Top 5 usually available)
     levels: 3
+    # Time window (seconds) to analyze for auction signals
     windowSec: 90
+    # Half-life (seconds) for Exponential Weighted Moving Average calculation
     ewmaHalfLifeSec: 20
+    # Z-Score threshold to trigger an auction alert
     scoreTrigger: 2.2
+    # Required swing magnitude to confirm a trend
     swingConfirm: 0.30
+    # Proximity to Lower Circuit (Basis Points) to consider "Near LC"
     nearLtpBps: 15
+    # Window start time (seconds) for action logic
     actionWindowStartSec: 300
+    # Safety margin (seconds) before closing
     safetySec: 45
 
-# Configurable PCA session slots (HH:mm). If omitted, fallback to built-in enum.
-pca:
-  slots:
-    - "09:30"
-    - "10:30"
-    - "11:30"
-    - "12:30"
-    - "13:30"
-    - "14:30"
+# ==============================================================================
+# Database Configuration (PostgreSQL)
+# ==============================================================================
+spring:
+  jackson:
+    time-zone: Asia/Kolkata
+  datasource:
+    # JDBC URL with Schema and Batch Rewrite optimization (Crucial for high-throughput)
+    url: jdbc:postgresql://localhost:5432/trading_app?currentSchema=trading&reWriteBatchedInserts=true
+    username: postgres
+    password: ${DB_PASSWORD}
+    driverClassName: org.postgresql.Driver
+    hikari:
+      # Max database connections (Increased for High-Scale 100+ scrips)
+      maximum-pool-size: 50
+  sql:
+    init:
+      #mode: never # Safety: Disable auto-execution of schema.sql in production
+      mode: always # Dev: Enable auto-execution of schema.sql for local dev
+  jpa:
+    hibernate:
+      #ddl-auto: validate # Safety: Detect schema skew but DO NOT modify DB structure
+      ddl-auto: update  # Only for local dev
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: trading
+        format_sql: true
+
+# ==============================================================================
+# Market Depth Suppression Configuration
+# ==============================================================================
+market:
+  depth:
+    suppress:
+      # Suppression threshold: Set to 105 to DISABLE suppression (User wants ALL data)
+      sell-pressure-threshold: 105
+      # Start filtering ticks after this time (10:30 AM)
+      start-time: "10:30"
+      # Optional suppression when downtrend + sell pressure are both true
+      downtrend-enabled: false
+      # Suppress when sell pressure >= this percent AND LTP is below prev close/open
+      downtrend-sell-pressure-threshold: 40
+      # Minimum drop in bps from prev close/open to qualify as downtrend (0 = any drop)
+      downtrend-ltp-drop-bps: 0
+
+# ==============================================================================
+# Centralized Application Configuration (Phase 5)
+# Controls limits, timeouts, and tuning parameters for the core engine
+# ==============================================================================
+app:
+  config:
+    esm:
+      # Master toggle to allow automatic ESM-triggered order placement
+      auto-exit-enabled: false
+      # Start monitoring this many minutes before session start
+      monitor-lead-minutes: 5
+      # Session length in minutes (call-auction window)
+      session-length-minutes: 45
+      # Hazard zone start offset from session start
+      hazard-start-minutes: 44
+      # Hazard timeout seconds after hazard start
+      hazard-timeout-seconds: 50
+      # Extra buffer after session end before expiry
+      deadline-seconds: 5
+      # Pre-fire to compensate latency in sniper rollover
+      sniper-prefire-ms: 200
+      # Treat streaming data as stale after this many seconds
+      snapshot-stale-sec: 30
+    market:
+      # Minimum interval between DB writes for a single scrip (User Goal: 1 tick/sec)
+      # 200 Scrips * 1/sec = 200 TPS (Very safe for PostgreSQL)
+      debounce-ms: 1000
+      # Interval for polling-based capture (REST backup logic)
+      polling-interval-ms: 1000
+      # Only persist if price changes by > X% (reduces noise)
+      # 0.0 means "Record any change", but only once per second (due to debounce)
+      significant-change-pct: 0.0 
+      # Force persist after X ms even if price stagnant (Heartbeat)
+      max-age-ms: 60000
+      # Time window for keeping tick history in memory (for analysis)
+      history-window-sec: 45
+    scheduler:
+      # If a task is overdue by X min (e.g. server down), mark as "Expired" & skip
+      staleness-threshold-min: 10
+      # Allow restarting a task if current time is within X sec of scheduled time
+      restart-window-sec: 30
+      # Cancel open orders X seconds before executing a new scheduled order
+      cancel-window-sec: 60
+    ingestion:
+      # Number of rows to process per transaction chunk (CSV Ingestion)
+      batch-size: 1000

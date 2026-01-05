@@ -13,6 +13,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
+/**
+ * Controller for fetching market news.
+ * Proxies requests to external news APIs.
+ */
 @RestController
 @RequestMapping("/api/news")
 public class NewsController {
@@ -36,7 +40,7 @@ public class NewsController {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":" + resp.statusCode() + ",\"message\":\"news fetch failed\"}");
         } catch (Exception ex) {
-            log.warn("News fetch error: {}", ex.getMessage());
+            log.debug("News fetch error (likely harmless): {}", ex.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body("{\"status\":502,\"message\":\"news fetch error\"}");
         }

@@ -1,12 +1,15 @@
 package com.exittrading.app.controller;
 
-import com.exittrading.app.service.AdminService;
-import com.exittrading.app.service.IstClock;
-import com.exittrading.app.service.KiteSessionManager;
+import com.exittrading.app.service.core.AdminService;
+import com.exittrading.app.service.core.IstClock;
+import com.exittrading.app.service.core.KiteSessionManager;
+import com.exittrading.app.service.core.SettingsService;
+import com.zerodhatech.kiteconnect.KiteConnect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.util.UriUtils;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -14,10 +17,15 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.Date;
 
+/**
+ * Controller for handling Kite Connect login redirects.
+ * Manages the exchange of request tokens for access tokens.
+ */
 @RestController
 @RequestMapping("/external")
 public class KiteRedirectController {
@@ -27,17 +35,33 @@ public class KiteRedirectController {
     private final KiteSessionManager sessionManager;
     private final IstClock clock;
     private final AdminService adminService;
+    private final SettingsService settingsService;
 
-    @Value("${kite.apiKey}")
-    private String apiKey;
-
-    @Value("${kite.apiSecret}")
-    private String apiSecret;
-
-    public KiteRedirectController(KiteSessionManager sessionManager, IstClock clock, AdminService adminService) {
+    public KiteRedirectController(KiteSessionManager sessionManager, IstClock clock, AdminService adminService,
+                                  SettingsService settingsService) {
         this.sessionManager = sessionManager;
         this.clock = clock;
         this.adminService = adminService;
+        this.settingsService = settingsService;
+    }
+
+    // New: Initiates the login flow
+    @GetMapping("/login")
+    public ResponseEntity<?> loginToKite() {
+        String apiKey = settingsService != null
+                ? settingsService.getString("kite.apiKey", null)
+                : System.getenv("KITE_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            return ResponseEntity.status(500).body("Kite API key not configured");
+        }
+        String redirectUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/external/kiteredirect")
+                .toUriString();
+        String url = "https://kite.zerodha.com/connect/login?v=3&api_key=" + apiKey;
+        if (redirectUrl != null && !redirectUrl.isBlank()) {
+            url += "&redirect_url=" + UriUtils.encode(redirectUrl, StandardCharsets.UTF_8);
+        }
+        return ResponseEntity.status(302).header("Location", url).build();
     }
 
     // Supports existing redirect pattern: /external/kiteredirect?status=success&request_token=...
@@ -60,6 +84,15 @@ public class KiteRedirectController {
     }
 
     private void performLogin(String requestToken) throws Exception {
+        String apiKey = settingsService != null
+                ? settingsService.getString("kite.apiKey", null)
+                : System.getenv("KITE_API_KEY");
+        String apiSecret = settingsService != null
+                ? settingsService.getString("kite.apiSecret", null)
+                : System.getenv("KITE_API_SECRET");
+        if (apiKey == null || apiKey.isBlank() || apiSecret == null || apiSecret.isBlank()) {
+            throw new IllegalStateException("Kite API key/secret are not configured");
+        }
         Class<?> kiteClass = Class.forName("com.zerodhatech.kiteconnect.KiteConnect");
         Object kite = kiteClass.getConstructor(String.class).newInstance(apiKey);
         Method generateSession = kiteClass.getMethod("generateSession", String.class, String.class);
@@ -69,7 +102,7 @@ public class KiteRedirectController {
         attachExpiryHook(kiteClass, kite);
         String userName = extractField(user, "userName");
         ZonedDateTime expiry = extractExpiry(user, "accessTokenExpiry");
-        sessionManager.initializeSession(kite, userName, expiry);
+        sessionManager.initializeSession((KiteConnect) kite, userName, expiry);
         if (adminService != null) {
             adminService.ensureUserExists(userName, userName);
         }
@@ -97,7 +130,8 @@ public class KiteRedirectController {
             if (value instanceof Instant instant) {
                 return clock.fromInstant(instant);
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.debug("Ignored exception: {}", e.getMessage());
         }
         return clock.now().plusHours(6);
     }
@@ -109,7 +143,8 @@ public class KiteRedirectController {
         try {
             Method method = targetType.getMethod(methodName, String.class);
             method.invoke(target, argument.toString());
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.debug("Ignored exception: {}", e.getMessage());
         }
     }
 
@@ -127,4 +162,3 @@ public class KiteRedirectController {
         }
     }
 }
-

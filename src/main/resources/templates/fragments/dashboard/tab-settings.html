@@ -1,0 +1,90 @@
+<div th:fragment="tabSettings" class="tab-pane fade" id="tab-settings" role="tabpanel"
+    aria-labelledby="tab-settings-link">
+    <div class="row g-4">
+        <div class="col-12">
+            <div class="card shadow-sm settings-card">
+                <div class="card-header bg-primary text-light d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <h5 class="mb-0">Settings</h5>
+                        <span class="badge bg-dark">Live</span>
+                    </div>
+                    <div class="text-light-50 small">Saved to config/runtime-settings.yml</div>
+                </div>
+                <div class="card-body">
+                    <div class="settings-layout row g-4">
+                        <div class="col-lg-4 col-xl-3">
+                            <div class="settings-section settings-quick mb-3">
+                                <div class="settings-section-head">
+                                    <h6 class="settings-section-title mb-0">User Defaults</h6>
+                                    <span class="settings-section-subtitle">Applies to selected user and new schedules</span>
+                                </div>
+                                <div class="d-flex flex-wrap gap-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="logging-toggle" />
+                                        <label class="form-check-label" for="logging-toggle">Enable verbose logging for
+                                            selected user</label>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="autoRepeat" />
+                                        <label class="form-check-label" for="autoRepeat">Repeat daily for new schedules</label>
+                                    </div>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="cancelOrders" checked />
+                                        <label class="form-check-label" for="cancelOrders">Cancel open orders 60s prior</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="settings-section mb-3">
+                                <div class="settings-section-head">
+                                    <h6 class="settings-section-title mb-0">Settings Tools</h6>
+                                    <span class="settings-section-subtitle">Filter and manage overrides</span>
+                                </div>
+                                <div class="settings-toolbar d-flex flex-column gap-3">
+                                    <div class="settings-toolbar-block">
+                                        <span class="settings-toolbar-title">Filter</span>
+                                        <div class="input-group input-group-sm settings-search">
+                                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                            <input id="settings-search" type="text" class="form-control"
+                                                placeholder="Filter by key or group..." />
+                                        </div>
+                                    </div>
+                                    <div class="settings-toolbar-block">
+                                        <span class="settings-toolbar-title">Actions</span>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <button class="btn btn-sm btn-outline-light" id="settings-refresh"
+                                                type="button">Refresh</button>
+                                            <button class="btn btn-sm btn-warning" id="settings-restore"
+                                                type="button">Restore defaults</button>
+                                            <button class="btn btn-sm btn-success" id="settings-save"
+                                                type="button">Save changes</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="settings-section settings-index">
+                                <div class="settings-section-head">
+                                    <h6 class="settings-section-title mb-0">Group Index</h6>
+                                    <span class="settings-section-subtitle">Jump to a module</span>
+                                </div>
+                                <div id="settings-group-index" class="settings-index-list">
+                                    <div class="text-muted small">Loading groups...</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-8 col-xl-9">
+                            <div class="settings-section">
+                                <div class="settings-section-head">
+                                    <h6 class="settings-section-title mb-0">Application Settings</h6>
+                                    <span class="settings-section-subtitle">All keys from application.yml</span>
+                                </div>
+                                <div id="settings-container" class="settings-container">
+                                    <div class="text-muted">Loading settings...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

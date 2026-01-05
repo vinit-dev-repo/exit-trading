@@ -1,23 +1,33 @@
 package com.exittrading.app.controller;
 
-import com.exittrading.app.service.IstClock;
-import com.exittrading.app.service.AdminService;
-import com.exittrading.app.service.DepthStreamService;
+import com.exittrading.app.service.core.IstClock;
+import com.exittrading.app.service.core.AdminService;
+import com.exittrading.app.service.core.DepthStreamService;
+import com.exittrading.app.service.core.SessionPersistence;
+import com.exittrading.app.service.core.SettingsService;
 import org.springframework.beans.factory.annotation.Autowired;
-import com.exittrading.app.service.KiteSessionManager;
+import com.exittrading.app.service.core.KiteSessionManager;
+import com.zerodhatech.kiteconnect.KiteConnect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZonedDateTime;
-import java.util.Date;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
+/**
+ * Controller for managing the Kite Connect session.
+ * Handles login, logout, expiry checks, and manual holding sync.
+ */
 @RestController
 @RequestMapping("/api/admin/session")
 public class SessionController {
@@ -28,27 +38,27 @@ public class SessionController {
     private final IstClock clock;
     private final AdminService adminService;
     private final DepthStreamService depthStreamService;
-
-    @Value("${kite.apiKey}")
-    private String apiKey;
-
-    @Value("${kite.apiSecret}")
-    private String apiSecret;
-
-    @Value("${kite.default.exchange:NSE}")
-    private String defaultExchange;
+    private final SessionPersistence sessionPersistence;
+    private final SettingsService settingsService;
 
     @Autowired
-    public SessionController(KiteSessionManager sessionManager, IstClock clock, AdminService adminService, DepthStreamService depthStreamService) {
+    public SessionController(KiteSessionManager sessionManager, 
+                             IstClock clock, 
+                             AdminService adminService, 
+                             DepthStreamService depthStreamService,
+                             SessionPersistence sessionPersistence,
+                             SettingsService settingsService) {
         this.sessionManager = sessionManager;
         this.clock = clock;
         this.adminService = adminService;
         this.depthStreamService = depthStreamService;
+        this.sessionPersistence = sessionPersistence;
+        this.settingsService = settingsService;
     }
 
     // Backward-compatible constructor for existing tests
     public SessionController(KiteSessionManager sessionManager, IstClock clock) {
-        this(sessionManager, clock, null, null);
+        this(sessionManager, clock, null, null, null, null);
     }
 
     @PostMapping("/login")
@@ -57,22 +67,22 @@ public class SessionController {
             String requestToken = payload.get("requestToken");
             log.info("Kite login attempt received (tokenLen={})", requestToken != null ? requestToken.length() : 0);
             // Guard against SDK/network stalls by enforcing a hard timeout
-            java.util.concurrent.ExecutorService tmp = java.util.concurrent.Executors.newSingleThreadExecutor();
+            java.util.concurrent.ExecutorService tmp = Executors.newSingleThreadExecutor();
             try {
-                LoginResult res = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                LoginResult res = CompletableFuture.supplyAsync(() -> {
                     try {
                         return performLogin(requestToken);
                     } catch (Exception e) {
                         throw new java.util.concurrent.CompletionException(e);
                     }
-                }, tmp).get(15, java.util.concurrent.TimeUnit.SECONDS);
+                }, tmp).get(15, TimeUnit.SECONDS);
                 log.info("Kite login success for {} (expires {})", res.userName, res.expiry);
                 return ResponseEntity.ok(Map.of("status", "connected", "user", res.userName, "expiry", res.expiry));
             } catch (java.util.concurrent.TimeoutException tex) {
                 log.error("Kite login timed out (tokenLen={})", requestToken != null ? requestToken.length() : 0);
                 return ResponseEntity.status(504).body(Map.of("status", "error", "message", "Kite login timed out"));
             } finally {
-                try { tmp.shutdownNow(); } catch (Exception ignored) {}
+                try { tmp.shutdownNow(); } catch (Exception e) { log.debug("Ignored exception during shutdown: {}", e.getMessage()); }
             }
         } catch (Exception ex) {
             Throwable cause = ex;
@@ -137,6 +147,19 @@ public class SessionController {
         }
     }
 
+    @PostMapping("/restore")
+    public ResponseEntity<?> manualRestore() {
+        if (sessionPersistence != null) {
+            sessionPersistence.tryRestore();
+            if (sessionManager.isActive()) {
+                return ResponseEntity.ok(Map.of("status", "restored", "user", sessionManager.getUserName()));
+            } else {
+                 return ResponseEntity.status(500).body(Map.of("status", "failed", "message", "Restore attempted but session is still inactive. Check logs."));
+            }
+        }
+        return ResponseEntity.status(500).body(Map.of("status", "error", "message", "SessionPersistence bean not active"));
+    }
+
     private String extractField(Object target, String fieldName) {
         try {
             Field field = target.getClass().getField(fieldName);
@@ -164,9 +187,10 @@ public class SessionController {
                 Object v = f.get(target);
                 if (v instanceof Number n) return n;
                 if (v != null) {
-                    try { return new java.math.BigDecimal(v.toString()); } catch (Exception ignored) {}
+                    try { return new java.math.BigDecimal(v.toString()); } catch (Exception e) { log.debug("Ignored number parse error: {}", e.getMessage()); }
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.debug("Ignored field access error: {}", e.getMessage());
             }
         }
         return null;
@@ -183,7 +207,8 @@ public class SessionController {
             if (value instanceof Instant instant) {
                 return clock.fromInstant(instant);
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.debug("Ignored expiry extraction error: {}", e.getMessage());
         }
         return clock.now().plusHours(6);
     }
@@ -195,7 +220,8 @@ public class SessionController {
         try {
             Method method = targetType.getMethod(methodName, String.class);
             method.invoke(target, argument.toString());
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.debug("Ignored method invocation error: {}", e.getMessage());
         }
     }
 
@@ -209,11 +235,21 @@ public class SessionController {
                     });
             Method setHook = kiteClass.getMethod("setSessionExpiryHook", hookClass);
             setHook.invoke(kite, hook);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.debug("Ignored hook attachment error: {}", e.getMessage());
         }
     }
 
     private LoginResult performLogin(String requestToken) throws Exception {
+        String apiKey = settingsService != null
+                ? settingsService.getString("kite.apiKey", null)
+                : System.getenv("KITE_API_KEY");
+        String apiSecret = settingsService != null
+                ? settingsService.getString("kite.apiSecret", null)
+                : System.getenv("KITE_API_SECRET");
+        if (apiKey == null || apiKey.isBlank() || apiSecret == null || apiSecret.isBlank()) {
+            throw new IllegalStateException("Kite API key/secret are not configured");
+        }
         Class<?> kiteClass = Class.forName("com.zerodhatech.kiteconnect.KiteConnect");
         Object kite = kiteClass.getConstructor(String.class).newInstance(apiKey);
         Method generateSession = kiteClass.getMethod("generateSession", String.class, String.class);
@@ -224,11 +260,11 @@ public class SessionController {
         String userName = extractField(user, "userName");
         String userId = extractField(user, "userId");
         ZonedDateTime expiry = extractExpiry(user, "accessTokenExpiry");
-        sessionManager.initializeSession(kite, userName, expiry);
+        sessionManager.initializeSession((KiteConnect) kite, userName, expiry);
         if (adminService != null) {
             adminService.ensureUserExists(userName, userName);
             // Best-effort holdings sync so UI shows actual holdings for this user
-            try { syncHoldingsFromKite(kite, userName); } catch (Exception ignored) { }
+            try { syncHoldingsFromKite(kite, userName); } catch (Exception e) { log.debug("Ignored holdings sync error: {}", e.getMessage()); }
         }
         // Start market depth streaming (best effort)
         try {
@@ -239,6 +275,12 @@ public class SessionController {
         } catch (Exception ex) {
             log.warn("Depth streaming start failed: {}", ex.getMessage());
         }
+        
+        // Persist session to DB immediately
+        if (sessionPersistence != null) {
+            sessionPersistence.persistSession();
+        }
+        
         return new LoginResult(userName, expiry);
     }
 
@@ -248,8 +290,8 @@ public class SessionController {
     private int syncHoldingsFromKite(Object kite, String userName) throws Exception {
         Method getHoldings = kite.getClass().getMethod("getHoldings");
         Object result = getHoldings.invoke(kite);
-        java.util.Set<String> symbols = new java.util.HashSet<>();
-        if (result instanceof java.util.List<?> list) {
+        Set<String> symbols = new HashSet<>();
+        if (result instanceof List<?> list) {
             for (Object item : list) {
                 // Kite Holding field is public String tradingSymbol (SerializedName "tradingsymbol")
                 String symbol = extractAnyField(item, "tradingSymbol", "tradingsymbol");

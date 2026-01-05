@@ -1,25 +1,38 @@
 package com.exittrading.app.controller;
 
 import com.exittrading.app.domain.UserAccount;
-import com.exittrading.app.service.AdminService;
-import com.exittrading.app.service.KiteSessionManager;
+import com.exittrading.app.service.core.AdminService;
+import com.exittrading.app.service.core.KiteSessionManager;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Controller for administrative features (user management, session status, toggles).
+ */
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
 
     private final AdminService adminService;
     private final KiteSessionManager sessionManager;
+    private final com.exittrading.app.service.ingestion.CsvIngestionService csvIngestionService;
 
-    public AdminController(AdminService adminService, KiteSessionManager sessionManager) {
+    public AdminController(AdminService adminService, KiteSessionManager sessionManager, com.exittrading.app.service.ingestion.CsvIngestionService csvIngestionService) {
         this.adminService = adminService;
         this.sessionManager = sessionManager;
+        this.csvIngestionService = csvIngestionService;
+    }
+
+    @PostMapping(value = "/ingest", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<String> ingestReport(@RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+                                             @RequestParam("date") java.time.LocalDate date) {
+        String result = csvIngestionService.ingestReport(file, date);
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/users")
@@ -43,7 +56,7 @@ public class AdminController {
     public Map<String, Object> sessionStatus() {
         // Use a mutable map to allow null values for JSON serialization.
         // Map.of(...) rejects nulls and was causing NPEs when expiry/user were null.
-        java.util.Map<String, Object> resp = new java.util.HashMap<>();
+        Map<String, Object> resp = new HashMap<>();
         resp.put("expiry", sessionManager.getExpiry());
         resp.put("active", sessionManager.getExpiry() != null);
         resp.put("user", sessionManager.getUserName());

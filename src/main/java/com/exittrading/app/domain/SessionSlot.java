@@ -4,6 +4,9 @@ import java.time.LocalTime;
 import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Enumeration for predefined trading execution slots.
+ */
 public enum SessionSlot {
     SLOT_0930(LocalTime.of(9, 30)),
     SLOT_1030(LocalTime.of(10, 30)),

@@ -3,6 +3,11 @@ package com.exittrading.app.service;
 import com.exittrading.app.domain.OrderSide;
 import com.exittrading.app.domain.TradingSchedule;
 import com.exittrading.app.dto.DepthView;
+import com.exittrading.app.service.core.DefaultKiteGateway;
+import com.exittrading.app.service.core.InstrumentService;
+import com.exittrading.app.service.core.IstClock;
+import com.exittrading.app.service.core.KiteSessionManager;
+import com.exittrading.app.service.core.SettingsService;
 import com.zerodhatech.kiteconnect.KiteConnect;
 import com.zerodhatech.kiteconnect.utils.Constants;
 import com.zerodhatech.models.DepthLevel;
@@ -11,13 +16,14 @@ import com.zerodhatech.models.Quote;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class DefaultKiteGatewayTest {
 
@@ -25,14 +31,17 @@ class DefaultKiteGatewayTest {
     private DefaultKiteGateway gateway;
     private FixedIstClock clock;
     private InstrumentService instrumentService;
+    private SettingsService settingsService;
+
 
     @BeforeEach
     void setUp() {
         clock = new FixedIstClock(ZonedDateTime.of(2024, 5, 1, 10, 0, 0, 0, ZoneId.of("Asia/Kolkata")));
         sessionManager = new KiteSessionManager(clock);
         instrumentService = new InstrumentService(sessionManager);
-        gateway = new DefaultKiteGateway(sessionManager, clock, instrumentService);
-        setExchange("NSE");
+        settingsService = mock(SettingsService.class);
+        when(settingsService.getString("kite.default.exchange", "NSE")).thenReturn("NSE");
+        gateway = new DefaultKiteGateway(sessionManager, clock, instrumentService, settingsService);
         KiteConnect.ORDERS.clear();
         KiteConnect.CANCELLED.clear();
         KiteConnect.QUOTES.clear();
@@ -60,7 +69,7 @@ class DefaultKiteGatewayTest {
         assertThat(KiteConnect.LAST_ORDER_PARAMS.quantity).isEqualTo(25);
         assertThat(KiteConnect.LAST_ORDER_PARAMS.transactionType).isEqualTo(Constants.TRANSACTION_TYPE_BUY);
         assertThat(KiteConnect.LAST_ORDER_PARAMS.orderType).isEqualTo(Constants.ORDER_TYPE_LIMIT);
-        assertThat(KiteConnect.LAST_ORDER_PARAMS.product).isEqualTo(Constants.PRODUCT_MIS);
+        assertThat(KiteConnect.LAST_ORDER_PARAMS.product).isEqualTo(Constants.PRODUCT_CNC);
         assertThat(KiteConnect.LAST_ORDER_PARAMS.validity).isEqualTo(Constants.VALIDITY_DAY);
         assertThat(KiteConnect.LAST_ORDER_PARAMS.price).isEqualTo(1510.25);
         assertThat(KiteConnect.LAST_VARIETY).isEqualTo(Constants.VARIETY_REGULAR);
@@ -105,16 +114,6 @@ class DefaultKiteGatewayTest {
         assertThat(view.getSellQuantity()).isEqualTo(200);
         assertThat(view.getLtp()).isEqualTo(BigDecimal.valueOf(245.75));
         assertThat(view.getCapturedAt()).isEqualTo(clock.now());
-    }
-
-    private void setExchange(String value) {
-        try {
-            Field field = DefaultKiteGateway.class.getDeclaredField("exchange");
-            field.setAccessible(true);
-            field.set(gateway, value);
-        } catch (Exception ex) {
-            throw new IllegalStateException(ex);
-        }
     }
 
     private static class FixedIstClock extends IstClock {

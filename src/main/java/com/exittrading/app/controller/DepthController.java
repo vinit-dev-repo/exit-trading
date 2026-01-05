@@ -1,17 +1,23 @@
 package com.exittrading.app.controller;
 
 import com.exittrading.app.dto.DepthView;
-import com.exittrading.app.service.AdminService;
-import com.exittrading.app.service.DepthStreamService;
-import org.springframework.web.bind.annotation.RequestParam;
-import com.exittrading.app.service.DepthService;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import com.exittrading.app.service.core.AdminService;
+import com.exittrading.app.service.core.DepthStreamService;
+import com.exittrading.app.service.core.DepthService;
+import com.exittrading.app.service.util.DepthViewUtil;
+import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+/**
+ * Controller for retrieving market depth data.
+ * Merges persisted snapshots with live data from the depth stream.
+ */
 @RestController
 @RequestMapping("/api/depth")
 public class DepthController {
@@ -30,12 +36,66 @@ public class DepthController {
     public List<DepthView> latestDepth(@PathVariable String username) {
         return adminService.findOptionalByUsername(username)
                 .map(user -> {
-                    // Prefer stream snapshot for timeliness
                     List<DepthView> fromStream = depthStreamService.snapshotFor(user);
-                    if (fromStream != null && !fromStream.isEmpty()) return fromStream;
-                    return depthService.latestOrLive(user);
+                    boolean needsFallback = (fromStream == null || fromStream.isEmpty());
+                    if (!needsFallback) {
+                        Set<String> expected = holdingSymbols(user);
+                        Set<String> received = fromStream.stream()
+                                .map(DepthView::getTradingsymbol)
+                                .map(DepthController::normalize)
+                                .filter(s -> s != null && !s.isBlank())
+                                .collect(Collectors.toSet());
+                        if (!expected.isEmpty() && !received.containsAll(expected)) {
+                            needsFallback = true;
+                        }
+                        if (!needsFallback && fromStream.stream().anyMatch(DepthViewUtil::needsEnrichment)) {
+                            needsFallback = true;
+                        }
+                    }
+                    List<DepthView> fallback = needsFallback ? depthService.latestOrLive(user) : null;
+                    return mergeDepth(fromStream, fallback);
                 })
                 .orElseGet(java.util.List::of);
+    }
+
+    private List<DepthView> mergeDepth(List<DepthView> primary, List<DepthView> fallback) {
+        Map<String, DepthView> merged = new LinkedHashMap<>();
+        if (primary != null) {
+            for (DepthView v : primary) {
+                String key = normalize(v != null ? v.getTradingsymbol() : null);
+                if (key != null) merged.put(key, v);
+            }
+        }
+        if (fallback != null) {
+            for (DepthView v : fallback) {
+                String key = normalize(v != null ? v.getTradingsymbol() : null);
+                if (key != null) {
+                    DepthView existing = merged.get(key);
+                    if (existing == null) {
+                        merged.put(key, v);
+                    } else {
+                        DepthViewUtil.mergeMissing(existing, v);
+                        merged.put(key, existing);
+                    }
+                }
+            }
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    private Set<String> holdingSymbols(com.exittrading.app.domain.UserAccount user) {
+        if (user == null || user.getHoldings() == null) return Set.of();
+        return user.getHoldings().stream()
+                .map(s -> s != null ? s.split("\\|")[0] : null)
+                .map(DepthController::normalize)
+                .filter(s -> s != null && !s.isBlank())
+                .collect(Collectors.toSet());
+    }
+
+    private static String normalize(String s) {
+        if (s == null) return null;
+        int idx = s.indexOf(':');
+        return idx > -1 ? s.substring(idx + 1) : s;
     }
 
     // Simple diagnostics endpoint to validate parsing end-to-end.

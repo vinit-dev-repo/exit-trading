@@ -4,6 +4,10 @@ import jakarta.persistence.*;
 
 import java.time.ZonedDateTime;
 
+/**
+ * Entity for audit logging of trade execution events.
+ * Captures success/failure details and timestamps for schedule executions.
+ */
 @Entity
 @Table(name = "execution_logs")
 public class ExecutionLog {

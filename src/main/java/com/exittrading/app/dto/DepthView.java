@@ -5,6 +5,10 @@ import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * DTO representing a market depth snapshot.
+ * Includes top 5 bids/asks and other market statistics.
+ */
 public class DepthView {
     private String tradingsymbol;
     private long buyQuantity;
